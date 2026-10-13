@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import type { AppError, DeviceView, LightAction, Region } from './types';
 
 /** The calls the UI needs from the Rust core. The store depends on this, not on Tauri. */
@@ -8,6 +9,9 @@ export interface Api {
   saveCredentials(accessId: string, accessSecret: string, region: Region): Promise<void>;
   listDevices(): Promise<DeviceView[]>;
   sendLightCommand(id: string, action: LightAction): Promise<void>;
+  isAutostart(): Promise<boolean>;
+  setAutostart(on: boolean): Promise<void>;
+  setTrayLabels(settings: string, quit: string): Promise<void>;
 }
 
 export function toAppError(e: unknown): AppError {
@@ -23,7 +27,10 @@ export const tauriApi: Api = {
   saveCredentials: (accessId, accessSecret, region) =>
     invoke('save_credentials', { accessId, accessSecret, region }),
   listDevices: () => invoke<DeviceView[]>('list_devices'),
-  sendLightCommand: (id, action) => invoke('send_light_command', { id, action })
+  sendLightCommand: (id, action) => invoke('send_light_command', { id, action }),
+  isAutostart: () => isEnabled(),
+  setAutostart: (on) => (on ? enable() : disable()),
+  setTrayLabels: (settings, quit) => invoke('set_tray_labels', { settings, quit })
 };
 
 export const onDevicesUpdated = (cb: (d: DeviceView[]) => void): Promise<UnlistenFn> =>

@@ -1,13 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { t } from '$lib/i18n.svelte';
   import { onDevicesError, onDevicesUpdated, onOpenSettings, onPopupShown, tauriApi } from '$lib/api';
   import { DeviceStore } from '$lib/devices.svelte';
   import DeviceSwitcher from '$lib/DeviceSwitcher.svelte';
   import InactivePanel from '$lib/InactivePanel.svelte';
   import { lampLight } from '$lib/light';
+  import { tweenedLook } from '$lib/lookTween.svelte';
   import LightPanel from '$lib/LightPanel.svelte';
   import PowerButton from '$lib/PowerButton.svelte';
   import Settings from '$lib/Settings.svelte';
+  import SettingsMenu from '$lib/SettingsMenu.svelte';
   import SyncFooter from '$lib/SyncFooter.svelte';
 
   const store = new DeviceStore(tauriApi);
@@ -15,7 +18,13 @@
   let selectedId = $state('');
   const selected = $derived(store.devices.find((d) => d.id === selectedId) ?? store.devices[0]);
   /** The focused lamp's light tints the whole window, so the colour on screen is always the real one. */
-  const look = $derived(selected?.light ? lampLight(selected.light) : undefined);
+  const target = $derived(selected?.light ? lampLight(selected.light) : undefined);
+  const look = tweenedLook(() => target, lampLight({ on: false } as never));
+
+  // The tray menu is native, so it has to be told when the language changes.
+  $effect(() => {
+    tauriApi.setTrayLabels(t('tray.settings'), t('tray.quit')).catch(() => {});
+  });
 
   onMount(() => {
     store.start();
@@ -31,12 +40,21 @@
   });
 </script>
 
-<main style:--light={look?.rgb ?? '0 0 0'}>
-  {#if store.screen === 'settings'}
+<main style:--light={look.current.rgb}>
+  {#if store.screen === 'credentials'}
     <div class="pad">
       <Settings
         onsave={(id, secret, region) => store.saveCredentials(id, secret, region)}
-        oncancel={store.configured ? () => store.closeSettings() : undefined}
+        oncancel={store.configured ? () => store.closeCredentials() : undefined}
+      />
+    </div>
+  {:else if store.screen === 'settings'}
+    <div class="pad">
+      <SettingsMenu
+        autostart={store.autostart}
+        onback={() => store.closeSettings()}
+        oncredentials={() => store.openCredentials()}
+        onautostart={(on) => store.setAutostart(on)}
       />
     </div>
   {:else}
@@ -65,7 +83,7 @@
     {:else if store.loading}
       <div class="stage"><div class="skeleton"></div></div>
     {:else}
-      <div class="stage">{#if !store.error}<p class="empty">Nenhum dispositivo encontrado.</p>{/if}</div>
+      <div class="stage">{#if !store.error}<p class="empty">{t('app.noDevices')}</p>{/if}</div>
     {/if}
 
     <SyncFooter
@@ -85,6 +103,9 @@
     flex-direction: column;
     height: 100vh;
     overflow: hidden;
+    background: var(--bg);
+    border-radius: var(--radius-window);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.07);
   }
   /* Ambient wash: the lamp's light falling on the top of the window. */
   main::before {
@@ -93,7 +114,6 @@
     inset: 0 0 40% 0;
     background: radial-gradient(ellipse 70% 70% at 50% 18%, rgb(var(--light) / 0.16), transparent 70%);
     pointer-events: none;
-    transition: opacity 0.6s var(--ease-out);
   }
 
   header {
@@ -125,8 +145,10 @@
   }
 
   .pad {
-    height: 100%;
-    padding: 18px 16px;
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    padding: 22px 16px 18px;
     overflow-y: auto;
   }
 

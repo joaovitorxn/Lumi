@@ -1,11 +1,12 @@
 <script lang="ts">
   import DeviceHero from './DeviceHero.svelte';
+  import { t } from './i18n.svelte';
   import type { DeviceView } from './types';
 
   let { device }: { device: DeviceView } = $props();
 
   const reason = $derived(
-    device.category !== 'dj' ? 'Ainda não suportado' : !device.online ? 'Offline' : 'Sem resposta'
+    device.category !== 'dj' ? t('inactive.unsupported') : !device.online ? t('inactive.offline') : t('inactive.noResponse')
   );
 </script>
 

@@ -1,7 +1,15 @@
 <script lang="ts">
   import type { Look } from './light';
 
-  let { category, on = false, look }: { category: string; on?: boolean; look?: Look } = $props();
+  let {
+    category,
+    on = false,
+    look,
+    brightness = 1
+  }: { category: string; on?: boolean; look?: Look; brightness?: number } = $props();
+
+  /** 0..1; the lamp never goes fully dark while on, so the lowest setting stays visible. */
+  const level = $derived(Math.min(1, Math.max(0, brightness)));
 
   const uid = $props.id();
   const kinds: Record<string, string> = { dj: 'light', cz: 'plug', sp: 'camera' };
@@ -15,6 +23,7 @@
   style:--light={look?.rgb}
   style:--core={look?.core}
   style:--edge={look?.edge}
+  style:--level={level}
   aria-hidden="true"
 >
   {#if kind === 'light'}
@@ -114,6 +123,7 @@
     height: 100%;
     width: auto;
     max-height: 196px;
+    transition: filter 0.3s var(--ease-out);
   }
 
   .pool {
@@ -130,7 +140,7 @@
       transform 0.8s var(--ease-out);
   }
   [data-state='on'] .pool {
-    opacity: 1;
+    opacity: calc(0.25 + 0.75 * var(--level, 1));
     transform: translateX(-50%) scaleX(1);
   }
 
@@ -144,7 +154,7 @@
   .glass.lit,
   .spec,
   .fil {
-    transition: opacity 0.55s var(--ease-out);
+    transition: opacity 0.35s var(--ease-out);
   }
   .glass.lit {
     opacity: 0;
@@ -157,13 +167,16 @@
     opacity: 0.16;
   }
   [data-state='on'] .glass.lit {
-    opacity: 1;
+    opacity: calc(0.3 + 0.7 * var(--level, 1));
+  }
+  [data-state='on'] svg {
+    filter: drop-shadow(0 0 calc(30px * var(--level, 1)) rgb(var(--light) / calc(0.55 * var(--level, 1))));
   }
   [data-state='on'] .spec {
-    opacity: 0.55;
+    opacity: calc(0.2 + 0.35 * var(--level, 1));
   }
   [data-state='on'] .fil {
-    opacity: 0.85;
+    opacity: calc(0.3 + 0.55 * var(--level, 1));
   }
   .metal {
     transition: opacity 0.55s var(--ease-out);

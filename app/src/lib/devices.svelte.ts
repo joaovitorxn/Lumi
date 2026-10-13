@@ -2,7 +2,7 @@ import { toAppError, type Api } from './api';
 import { applyAction } from './light';
 import type { AppError, DeviceView, LightAction, Region } from './types';
 
-export type Screen = 'devices' | 'settings';
+export type Screen = 'devices' | 'settings' | 'credentials';
 
 /** After a command, server reads for that device are distrusted this long: Tuya's status lags the command. */
 const PROTECT_MS = 3000;
@@ -14,6 +14,8 @@ export class DeviceStore {
   screen = $state<Screen>('devices');
   /** True once credentials exist, so the settings screen can always be cancelled. */
   configured = $state(false);
+  /** Whether Lumi is registered to start with Windows. */
+  autostart = $state(false);
   /** Timestamp of the last successful read from the cloud, or null before the first one. */
   lastSync = $state<number | null>(null);
 
@@ -33,8 +35,9 @@ export class DeviceStore {
   async start() {
     try {
       this.configured = await this.api.hasCredentials();
+      this.autostart = await this.api.isAutostart().catch(() => false);
       if (!this.configured) {
-        this.screen = 'settings';
+        this.screen = 'credentials';
         return;
       }
     } catch (e) {
@@ -66,7 +69,7 @@ export class DeviceStore {
 
   fail(error: AppError) {
     this.error = error;
-    if (error.kind === 'no_credentials') this.screen = 'settings';
+    if (error.kind === 'no_credentials') this.screen = 'credentials';
   }
 
   async sendLight(id: string, action: LightAction) {
@@ -97,8 +100,29 @@ export class DeviceStore {
     await this.refresh();
   }
 
+  /** The settings menu, or straight to the credentials form while there are none yet. */
   openSettings() {
+    this.screen = this.configured ? 'settings' : 'credentials';
+  }
+
+  openCredentials() {
+    this.screen = 'credentials';
+  }
+
+  /** Leaves the credentials form without saving: back to the menu it was opened from. */
+  closeCredentials() {
     this.screen = 'settings';
+  }
+
+  async setAutostart(on: boolean) {
+    const before = this.autostart;
+    this.autostart = on;
+    try {
+      await this.api.setAutostart(on);
+    } catch (e) {
+      this.autostart = before;
+      this.error = toAppError(e);
+    }
   }
 
   closeSettings() {

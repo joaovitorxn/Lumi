@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tweenedLook } from './lookTween.svelte';
+  import { locale, t } from './i18n.svelte';
   import DeviceHero from './DeviceHero.svelte';
   import Icon from './Icon.svelte';
   import {
@@ -23,12 +25,18 @@
   /** Slider values while the thumb is being dragged; nothing is sent until release. */
   let drafts = $state<Record<string, number>>({});
 
-  const look = $derived(lampLight(light));
+  const target = $derived(lampLight(light));
+  // svelte-ignore state_referenced_locally
+  const look = tweenedLook(() => target, target);
   const current = $derived(effectiveBrightness(light));
   const shown = $derived(drafts.brightness ?? current);
   const white = $derived(light.mode === 'white');
   const caption = $derived(
-    !light.on ? 'Toque no botão para ligar' : white ? `Branco ${warmthName(light.temperature).toLowerCase()}` : hueName(light.hue)
+    !light.on
+      ? t('light.tapToTurnOn')
+      : white
+        ? t('light.whiteNamed', { warmth: warmthName(light.temperature).toLowerCase() })
+        : hueName(light.hue)
   );
 
   /** In colour mode brightness is the V of the colour: send the whole colour, never a bare brightness. */
@@ -52,23 +60,23 @@
 
 <section class="panel" class:off={!light.on} data-stale={stale ? 'true' : undefined} aria-label={device.name}>
   <div class="hero">
-    <DeviceHero category="dj" on={light.on} {look} />
+    <DeviceHero category="dj" on={light.on} look={look.current} brightness={(shown - 10) / 990} />
   </div>
 
   <div class="readout">
     <div class="num">{brightnessPct(shown)}<sup>%</sup></div>
     <div class="what">
-      <b>{light.on ? 'Brilho' : 'Desligada'}</b>
+      <b>{light.on ? t('light.brightness') : t('light.off')}</b>
       <span>{caption}</span>
     </div>
   </div>
 
   <div class="main">
-    <button class="step" aria-label="Diminuir brilho" disabled={!light.on} onclick={() => setBrightness(stepBrightness(current, -1))}>
+    <button class="step" aria-label={t('light.dimmer')} disabled={!light.on} onclick={() => setBrightness(stepBrightness(current, -1))}>
       <Icon name="minus" size={18} />
     </button>
     <Slider
-      label="Brilho"
+      label={t('light.brightness')}
       hideLabel
       variant="main"
       min={10}
@@ -78,7 +86,7 @@
       oninput={drag('brightness')}
       onchange={(v) => release('brightness', v, setBrightness)}
     />
-    <button class="step" aria-label="Aumentar brilho" disabled={!light.on} onclick={() => setBrightness(stepBrightness(current, 1))}>
+    <button class="step" aria-label={t('light.brighter')} disabled={!light.on} onclick={() => setBrightness(stepBrightness(current, 1))}>
       <Icon name="plus" size={18} />
     </button>
   </div>
@@ -91,8 +99,8 @@
       disabled={!light.on}
       onclick={() => onaction({ type: 'set_temperature', value: light.temperature })}
     >
-      <span class="head"><span class="ic"><Icon name="sun" size={18} /></span><small>Branco</small></span>
-      <b>{kelvin(light.temperature).toLocaleString('pt-BR')} K · {warmthName(light.temperature)}</b>
+      <span class="head"><span class="ic"><Icon name="sun" size={18} /></span><small>{t('light.white')}</small></span>
+      <b>{kelvin(light.temperature).toLocaleString(locale.tag)} K · {warmthName(light.temperature)}</b>
     </button>
     <button
       class="tile"
@@ -101,15 +109,15 @@
       disabled={!light.on}
       onclick={() => onaction({ type: 'set_colour', h: light.hue, s: light.saturation, v: light.value })}
     >
-      <span class="head"><span class="ic"><span class="swatch"></span></span><small>Cor</small></span>
-      <b>{white ? 'Toque para escolher' : `${hueName(light.hue)} · ${Math.round(light.saturation / 10)}%`}</b>
+      <span class="head"><span class="ic"><span class="swatch"></span></span><small>{t('light.colour')}</small></span>
+      <b>{white ? t('light.tapToChoose') : `${hueName(light.hue)} · ${Math.round(light.saturation / 10)}%`}</b>
     </button>
   </div>
 
   <div class="fine">
     {#if white}
       <Slider
-        label="Temperatura"
+        label={t('light.temperature')}
         variant="temp"
         min={0}
         max={1000}
@@ -120,7 +128,7 @@
       />
     {:else}
       <Slider
-        label="Matiz"
+        label={t('light.hue')}
         variant="hue"
         min={0}
         max={360}
@@ -130,7 +138,7 @@
         onchange={(v) => release('hue', v, (h) => colour(h, light.saturation))}
       />
       <Slider
-        label="Saturação"
+        label={t('light.saturation')}
         variant="sat"
         min={0}
         max={1000}
@@ -257,6 +265,7 @@
     transition:
       border-color 0.25s var(--ease-out),
       background 0.25s var(--ease-out),
+      box-shadow 0.25s var(--ease-out),
       transform 0.15s var(--ease-out);
   }
   .tile:active:not(:disabled) {
@@ -295,6 +304,7 @@
   .tile b {
     display: block;
     color: var(--muted);
+    transition: color 0.25s var(--ease-out);
     font-size: 14px;
     font-weight: 600;
     line-height: 1.3;

@@ -19,13 +19,18 @@ pub fn run() {
     tauri::Builder::default()
         // A second launch would add a second tray icon; do nothing instead.
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(DeviceService::new(Arc::new(KeyringStore::new("positivo-tray"))))
         .manage(PopupState::default())
         .invoke_handler(tauri::generate_handler![
             commands::has_credentials,
             commands::save_credentials,
             commands::list_devices,
-            commands::send_light_command
+            commands::send_light_command,
+            commands::set_tray_labels
         ])
         .setup(|app| shell::setup(app))
         .run(tauri::generate_context!())

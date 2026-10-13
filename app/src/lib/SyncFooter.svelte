@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { locale, t } from './i18n.svelte';
   import Icon from './Icon.svelte';
   import type { AppError } from './types';
 
@@ -18,7 +19,7 @@
 
   const message = $derived(error ? error.message.charAt(0).toUpperCase() + error.message.slice(1) : '');
   const time = $derived(
-    lastSync === null ? '' : new Date(lastSync).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    lastSync === null ? '' : new Date(lastSync).toLocaleTimeString(locale.tag, { hour: '2-digit', minute: '2-digit' })
   );
 </script>
 
@@ -26,17 +27,23 @@
   {#if error}
     <span class="status bad" role="alert" title={error.message}><Icon name="alert" size={16} /><span class="msg">{message}</span></span>
   {:else if loading}
-    <span class="status" role="status"><span class="spinner"></span>Atualizando…</span>
+    <span class="status" role="status"><span class="spinner"></span>{t('sync.updating')}</span>
   {:else}
-    <span class="status" role="status"><i class="led" class:idle={lastSync === null}></i>{lastSync === null ? 'Aguardando…' : `Sincronizado às ${time}`}</span>
+    <span class="status" role="status">
+      {#if lastSync === null}
+        <span class="ico"><Icon name="clock" size={15} /></span>{t('sync.waiting')}
+      {:else}
+        <span class="ico ok"><Icon name="check" size={15} /></span>{t('sync.syncedAt', { time })}
+      {/if}
+    </span>
   {/if}
   <span class="tools">
     {#if error}
-      <button class="retry" onclick={onrefresh}>Tentar de novo</button>
+      <button class="retry" onclick={onrefresh}>{t('sync.retry')}</button>
     {:else}
-      <button aria-label="Atualizar" disabled={loading} onclick={onrefresh}><Icon name="refresh" size={17} /></button>
+      <button aria-label={t('sync.refresh')} disabled={loading} onclick={onrefresh}><Icon name="refresh" size={17} /></button>
     {/if}
-    <button aria-label="Configurações" onclick={onsettings}><Icon name="settings" size={17} /></button>
+    <button aria-label={t('sync.settings')} onclick={onsettings}><Icon name="settings" size={17} /></button>
   </span>
 </footer>
 
@@ -68,15 +75,12 @@
     overflow: hidden;
     line-height: 1.3;
   }
-  .led {
-    width: 6px;
-    height: 6px;
+  .ico {
+    display: flex;
     flex: none;
-    border-radius: 50%;
-    background: var(--ok);
   }
-  .led.idle {
-    background: #5d5b57;
+  .ico.ok {
+    color: var(--ok);
   }
   .spinner {
     width: 12px;

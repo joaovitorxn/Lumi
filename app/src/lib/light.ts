@@ -1,3 +1,4 @@
+import { t } from './i18n.svelte';
 import type { LightAction, LightState } from './types';
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
@@ -30,19 +31,19 @@ export function kelvin(temperature: number): number {
 }
 
 export function warmthName(temperature: number): string {
-  return temperature < 340 ? 'Quente' : temperature < 670 ? 'Neutro' : 'Frio';
+  return temperature < 340 ? t('warmth.warm') : temperature < 670 ? t('warmth.neutral') : t('warmth.cool');
 }
 
 export function hueName(hue: number): string {
   const h = ((hue % 360) + 360) % 360;
-  if (h < 15 || h >= 335) return 'Vermelho';
-  if (h < 45) return 'Laranja';
-  if (h < 70) return 'Amarelo';
-  if (h < 160) return 'Verde';
-  if (h < 200) return 'Ciano';
-  if (h < 255) return 'Azul';
-  if (h < 290) return 'Violeta';
-  return 'Rosa';
+  if (h < 15 || h >= 335) return t('hue.red');
+  if (h < 45) return t('hue.orange');
+  if (h < 70) return t('hue.yellow');
+  if (h < 160) return t('hue.green');
+  if (h < 200) return t('hue.cyan');
+  if (h < 255) return t('hue.blue');
+  if (h < 290) return t('hue.violet');
+  return t('hue.pink');
 }
 
 /** What the lamp will look like after `action`, used to update the panel before Tuya answers. */

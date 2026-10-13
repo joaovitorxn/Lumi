@@ -1,4 +1,4 @@
-# Positivo Tray
+# Lumi
 
 App de bandeja do Windows para controlar dispositivos Positivo Casa Inteligente (Tuya) pela nuvem.
 

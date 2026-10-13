@@ -20,15 +20,18 @@ function fakeApi(over: Partial<Api> = {}): Api {
     saveCredentials: vi.fn().mockResolvedValue(undefined),
     listDevices: vi.fn().mockResolvedValue([lamp]),
     sendLightCommand: vi.fn().mockResolvedValue(undefined),
+    isAutostart: vi.fn().mockResolvedValue(false),
+    setAutostart: vi.fn().mockResolvedValue(undefined),
+    setTrayLabels: vi.fn().mockResolvedValue(undefined),
     ...over
   };
 }
 
 describe('DeviceStore', () => {
-  it('start goes to settings when there are no credentials', async () => {
+  it('start opens the credentials form when there are none', async () => {
     const store = new DeviceStore(fakeApi({ hasCredentials: vi.fn().mockResolvedValue(false) }));
     await store.start();
-    expect(store.screen).toBe('settings');
+    expect(store.screen).toBe('credentials');
   });
 
   it('start loads devices when credentials exist', async () => {
@@ -48,12 +51,12 @@ describe('DeviceStore', () => {
     expect(store.error).toEqual({ kind: 'network', message: 'sem conexão' });
   });
 
-  it('a no_credentials error opens settings', async () => {
+  it('a no_credentials error opens the credentials form', async () => {
     const store = new DeviceStore(
       fakeApi({ listDevices: vi.fn().mockRejectedValue({ kind: 'no_credentials', message: 'x' }) })
     );
     await store.refresh();
-    expect(store.screen).toBe('settings');
+    expect(store.screen).toBe('credentials');
   });
 
   it('sendLight updates the card immediately and calls the API', async () => {
@@ -183,5 +186,38 @@ describe('DeviceStore', () => {
     expect(fresh.configured).toBe(false);
     await fresh.saveCredentials('id', 'secret', 'us');
     expect(fresh.configured).toBe(true);
+  });
+
+  it('settings opens the menu; credentials open from it and cancel returns to it', async () => {
+    const store = new DeviceStore(fakeApi());
+    await store.start();
+    store.openSettings();
+    expect(store.screen).toBe('settings');
+    store.openCredentials();
+    expect(store.screen).toBe('credentials');
+    store.closeCredentials();
+    expect(store.screen).toBe('settings');
+    store.closeSettings();
+    expect(store.screen).toBe('devices');
+  });
+
+  it('without credentials, settings goes straight to the form', () => {
+    const store = new DeviceStore(fakeApi());
+    store.openSettings();
+    expect(store.screen).toBe('credentials');
+  });
+
+  it('autostart is read on start, applied, and rolled back when it fails', async () => {
+    const api = fakeApi({ isAutostart: vi.fn().mockResolvedValue(true) });
+    const store = new DeviceStore(api);
+    await store.start();
+    expect(store.autostart).toBe(true);
+    await store.setAutostart(false);
+    expect(api.setAutostart).toHaveBeenCalledWith(false);
+    expect(store.autostart).toBe(false);
+    api.setAutostart = vi.fn().mockRejectedValue({ kind: 'unknown', message: 'negado' });
+    await store.setAutostart(true);
+    expect(store.autostart).toBe(false);
+    expect(store.error?.message).toBe('negado');
   });
 });

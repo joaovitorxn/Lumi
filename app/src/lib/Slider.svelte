@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { cubicOut } from 'svelte/easing';
+  import { Tween } from 'svelte/motion';
+
   type Variant = 'main' | 'temp' | 'hue' | 'sat';
 
   let {
@@ -27,7 +30,14 @@
   } = $props();
 
   const id = $props.id();
-  const progress = $derived((value - min) / (max - min));
+  /** Follows `value` smoothly (the +/- buttons), but sticks to the thumb while it is being dragged. */
+  // svelte-ignore state_referenced_locally
+  const eased = new Tween(value, { duration: 220, easing: cubicOut });
+  let dragging = false;
+  $effect(() => {
+    eased.set(value, { duration: dragging ? 0 : 220 });
+  });
+  const progress = $derived((eased.current - min) / (max - min));
   const read = (e: Event) => Number((e.currentTarget as HTMLInputElement).value);
 </script>
 
@@ -38,10 +48,13 @@
     type="range"
     {min}
     {max}
-    {value}
+    value={eased.current}
     {disabled}
     style:--p={progress}
     style:--hue={hue}
+    onpointerdown={() => (dragging = true)}
+    onpointerup={() => (dragging = false)}
+    onpointercancel={() => (dragging = false)}
     oninput={(e) => oninput?.(read(e))}
     onchange={(e) => onchange?.(read(e))}
   />

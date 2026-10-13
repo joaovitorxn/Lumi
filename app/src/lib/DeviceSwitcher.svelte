@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte';
   import type { DeviceView } from './types';
 
   let {
@@ -44,7 +45,7 @@
 </script>
 
 <!-- tabindex=-1 keeps the scroll container itself out of the Tab order; the pills are the stops. -->
-<nav aria-label="Aparelhos" tabindex="-1" class:fade-left={fadeLeft} class:fade-right={fadeRight} bind:this={nav}>
+<nav aria-label={t('devices.nav')} tabindex="-1" class:fade-left={fadeLeft} class:fade-right={fadeRight} bind:this={nav}>
   {#each devices as device (device.id)}
     <button
       class="pill"

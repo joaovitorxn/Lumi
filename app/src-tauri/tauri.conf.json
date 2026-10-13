@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "app",
+  "productName": "Lumi",
   "version": "0.1.0",
   "identifier": "com.positivo.tray",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Positivo Tray",
+        "title": "Lumi",
         "width": 360,
         "height": 560,
         "visible": false,
@@ -21,7 +21,8 @@
         "resizable": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "shadow": true
+        "transparent": true,
+        "shadow": false
       }
     ],
     "security": {

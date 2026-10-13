@@ -42,3 +42,14 @@ pub async fn send_light_command(
 ) -> Result<(), CommandError> {
     service.send_light_command(&id, action).await
 }
+
+/// Relabels the native tray menu when the UI language changes.
+#[tauri::command]
+pub fn set_tray_labels(
+    items: State<'_, crate::shell::TrayItems>,
+    settings: String,
+    quit: String,
+) -> Result<(), CommandError> {
+    items.set_labels(&settings, &quit);
+    Ok(())
+}

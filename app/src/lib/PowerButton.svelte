@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n.svelte';
   import Icon from './Icon.svelte';
 
   let {
@@ -12,7 +13,7 @@
 <button
   class="power"
   class:on
-  aria-label={`${on ? 'Desligar' : 'Ligar'} ${name}`}
+  aria-label={t(on ? 'power.off' : 'power.on', { name })}
   aria-pressed={on}
   {disabled}
   {onclick}

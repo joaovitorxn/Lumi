@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::menu::{Menu, MenuItem};
+use tauri::Wry;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WindowEvent};
 
@@ -25,10 +26,27 @@ pub struct PopupState {
     slide_generation: AtomicU64,
 }
 
+/// The tray menu entries, kept so their text can follow the UI language.
+pub struct TrayItems {
+    settings: MenuItem<Wry>,
+    quit: MenuItem<Wry>,
+}
+
+impl TrayItems {
+    pub fn set_labels(&self, settings: &str, quit: &str) {
+        let _ = self.settings.set_text(settings);
+        let _ = self.quit.set_text(quit);
+    }
+}
+
 pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let settings = MenuItem::with_id(app, "settings", "Configurações", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&settings, &quit])?;
+    app.manage(TrayItems {
+        settings: settings.clone(),
+        quit: quit.clone(),
+    });
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(
@@ -36,7 +54,7 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 .cloned()
                 .ok_or("o app precisa de um ícone padrão")?,
         )
-        .tooltip("Positivo Tray")
+        .tooltip("Lumi")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
