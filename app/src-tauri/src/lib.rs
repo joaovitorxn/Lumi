@@ -1,3 +1,4 @@
+mod devices;
 mod tuya;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
