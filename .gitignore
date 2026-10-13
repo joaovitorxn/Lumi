@@ -9,3 +9,4 @@ app/src-tauri/gen/
 .env
 .superpowers/
 .impeccable/review/
+dist/

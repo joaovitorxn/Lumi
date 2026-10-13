@@ -38,6 +38,35 @@ pub enum ClickAction {
     Ignore,
 }
 
+/// How far (logical pixels) the popup starts from its final spot, on the tray side.
+pub const SLIDE_DISTANCE: f64 = 36.0;
+pub const SLIDE_MS: u128 = 360;
+pub const FRAME_MS: u64 = 16;
+/// 2.2 lets the slide run about 15% past its target before settling: a soft bounce, not a spring.
+const BACK_OVERSHOOT: f64 = 2.2;
+
+/// Ease-out with a small overshoot: 0 at t=0, exactly 1 for t>=1, a little over 1 on the way.
+fn ease_out_back(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    let c3 = BACK_OVERSHOOT + 1.0;
+    1.0 + c3 * (t - 1.0).powi(3) + BACK_OVERSHOOT * (t - 1.0).powi(2)
+}
+
+/// Vertical position at progress `t` (0..1) of a slide from `from` to `to`.
+pub fn slide_y(from: i32, to: i32, t: f64) -> i32 {
+    (from as f64 + (to - from) as f64 * ease_out_back(t)).round() as i32
+}
+
+/// Where the slide starts: on the tray's side of the final spot, `distance` pixels away, so the
+/// popup always moves away from the tray icon it came from.
+pub fn slide_start(final_y: i32, tray_y: i32, distance: i32) -> i32 {
+    if final_y < tray_y {
+        final_y + distance
+    } else {
+        final_y - distance
+    }
+}
+
 pub fn click_action(visible: bool, ms_since_blur_hide: Option<u128>) -> ClickAction {
     if visible {
         ClickAction::Hide
@@ -101,5 +130,43 @@ mod tests {
     fn click_right_after_a_blur_hide_is_ignored_so_it_does_not_reopen() {
         assert_eq!(click_action(false, Some(40)), ClickAction::Ignore);
         assert_eq!(click_action(false, Some(900)), ClickAction::Show);
+    }
+
+    #[test]
+    fn the_slide_starts_at_the_start_and_lands_exactly_on_the_target() {
+        assert_eq!(slide_y(300, 200, 0.0), 300);
+        assert_eq!(slide_y(300, 200, 1.0), 200);
+        assert_eq!(slide_y(300, 200, 5.0), 200);
+        assert_eq!(slide_y(300, 200, -1.0), 300);
+    }
+
+    #[test]
+    fn the_slide_overshoots_a_little_then_settles() {
+        // Moving up from 300 to 200: the bounce passes 200 (a smaller y) before settling back on it.
+        let ys: Vec<i32> = (0..=100).map(|i| slide_y(300, 200, i as f64 / 100.0)).collect();
+        let lowest = *ys.iter().min().unwrap();
+        assert!(lowest < 200, "no overshoot: {lowest}");
+        assert!(lowest >= 180, "bounce too big: {lowest}");
+        assert_eq!(*ys.last().unwrap(), 200);
+        let peak = ys.iter().position(|&y| y == lowest).unwrap();
+        assert!(
+            ys[peak..].windows(2).all(|w| w[1] >= w[0]),
+            "does not settle monotonically"
+        );
+    }
+
+    #[test]
+    fn the_slide_works_downwards_too() {
+        let ys: Vec<i32> = (0..=100).map(|i| slide_y(100, 200, i as f64 / 100.0)).collect();
+        assert!(*ys.iter().max().unwrap() > 200);
+        assert_eq!(*ys.last().unwrap(), 200);
+    }
+
+    #[test]
+    fn the_popup_starts_on_the_tray_side_of_its_final_spot() {
+        // Popup above a bottom tray: it starts lower, closer to the tray, and rises.
+        assert_eq!(slide_start(400, 1040, 24), 424);
+        // Popup below a top tray: it starts higher, closer to the tray, and drops.
+        assert_eq!(slide_start(48, 0, 24), 24);
     }
 }

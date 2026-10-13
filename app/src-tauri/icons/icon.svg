@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#23242b" />
+      <stop offset="1" stop-color="#0d0d10" />
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffbf70" stop-opacity=".5" />
+      <stop offset=".55" stop-color="#ffbf70" stop-opacity=".12" />
+      <stop offset="1" stop-color="#ffbf70" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="pool" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffbf70" stop-opacity=".42" />
+      <stop offset="1" stop-color="#ffbf70" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glass" cx="50%" cy="40%" r="62%">
+      <stop offset="0" stop-color="#fff" stop-opacity=".97" />
+      <stop offset=".38" stop-color="#ffdca8" />
+      <stop offset="1" stop-color="#e8a35a" />
+    </radialGradient>
+    <linearGradient id="metal" x1="0" x2="1">
+      <stop offset="0" stop-color="#5d6068" />
+      <stop offset=".3" stop-color="#d6d8dd" />
+      <stop offset=".62" stop-color="#8b8e96" />
+      <stop offset="1" stop-color="#4b4d54" />
+    </linearGradient>
+    <clipPath id="clip"><rect width="1024" height="1024" rx="228" /></clipPath>
+  </defs>
+
+  <g clip-path="url(#clip)">
+    <rect width="1024" height="1024" fill="url(#tile)" />
+    <circle cx="512" cy="450" r="470" fill="url(#glow)" />
+    <ellipse cx="512" cy="846" rx="270" ry="40" fill="url(#pool)" />
+
+    <!-- The same bulb the app draws (viewBox 120x160), scaled up -->
+    <g transform="translate(262 120) scale(4.17)">
+      <path
+        d="M60 8c-27 0-46 19-46 44 0 18 8 28 18 38 5 6 7 11 7 19h42c0-8 2-13 7-19 10-10 18-20 18-38C106 27 87 8 60 8z"
+        fill="url(#glass)"
+      />
+      <path
+        d="M60 8c-27 0-46 19-46 44 0 18 8 28 18 38 5 6 7 11 7 19h42c0-8 2-13 7-19 10-10 18-20 18-38C106 27 87 8 60 8z"
+        fill="none"
+        stroke="#fff"
+        stroke-opacity=".16"
+        stroke-width="1.5"
+      />
+      <path d="M33 32c5-11 13-18 24-21" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="3.2" stroke-linecap="round" />
+      <path d="M49 108V76m22 32V76M49 76c3-11 19-11 22 0" fill="none" stroke="#fff" stroke-opacity=".88" stroke-width="2.4" stroke-linecap="round" />
+      <rect x="38" y="109" width="44" height="9" rx="3" fill="#bfc2c9" />
+      <rect x="36" y="118" width="48" height="30" rx="5" fill="url(#metal)" />
+      <path d="M36 126h48M36 134h48M36 142h48" stroke="#000" stroke-opacity=".28" stroke-width="2" />
+      <path d="M46 148h28l-4 8H50z" fill="#2a2b30" />
+    </g>
+  </g>
+
+  <rect x="3" y="3" width="1018" height="1018" rx="225" fill="none" stroke="#fff" stroke-opacity=".09" stroke-width="6" />
+</svg>

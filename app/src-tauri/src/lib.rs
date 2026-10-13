@@ -1,3 +1,5 @@
+#[cfg(windows)]
+mod vsync;
 mod commands;
 mod devices;
 mod popup;

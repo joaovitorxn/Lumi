@@ -91,8 +91,8 @@
       disabled={!light.on}
       onclick={() => onaction({ type: 'set_temperature', value: light.temperature })}
     >
-      <span class="ic"><Icon name="sun" size={20} /></span>
-      <span class="txt"><small>Branco</small><b>{kelvin(light.temperature).toLocaleString('pt-BR')} K · {warmthName(light.temperature)}</b></span>
+      <span class="head"><span class="ic"><Icon name="sun" size={18} /></span><small>Branco</small></span>
+      <b>{kelvin(light.temperature).toLocaleString('pt-BR')} K · {warmthName(light.temperature)}</b>
     </button>
     <button
       class="tile"
@@ -101,10 +101,8 @@
       disabled={!light.on}
       onclick={() => onaction({ type: 'set_colour', h: light.hue, s: light.saturation, v: light.value })}
     >
-      <span class="ic"><span class="swatch" style:--hue={light.hue}></span></span>
-      <span class="txt"
-        ><small>Cor</small><b>{white ? 'Toque para escolher' : `${hueName(light.hue)} · ${Math.round(light.saturation / 10)}%`}</b></span
-      >
+      <span class="head"><span class="ic"><span class="swatch"></span></span><small>Cor</small></span>
+      <b>{white ? 'Toque para escolher' : `${hueName(light.hue)} · ${Math.round(light.saturation / 10)}%`}</b>
     </button>
   </div>
 
@@ -243,7 +241,7 @@
     margin-top: 12px;
   }
   .tile {
-    height: 64px;
+    height: 68px;
     padding: 10px 12px;
     display: flex;
     flex-direction: column;
@@ -273,34 +271,40 @@
       inset 0 1px 0 rgb(255 255 255 / 0.06),
       0 2px 4px rgb(0 0 0 / 0.5);
   }
-  .tile.sel .txt b {
+  .tile.sel b {
     color: var(--text);
   }
   .tile:disabled {
     opacity: 0.55;
     cursor: default;
   }
+  /* Icon and label share one row, so icon + label + value fit the tile without spilling. */
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+  }
+  .head small {
+    font-size: 12px;
+    line-height: 1.2;
+  }
   .ic {
     display: flex;
-    color: var(--muted);
   }
-  .txt small {
-    display: block;
-    font-size: 11.5px;
-    color: var(--muted);
-  }
-  .txt b {
+  .tile b {
     display: block;
     color: var(--muted);
     font-size: 14px;
     font-weight: 600;
+    line-height: 1.3;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .swatch {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: conic-gradient(#f66, #fc4, #6d6, #4cf, #86f, #f6c, #f66);
     box-shadow: inset 0 0 0 2px #17171a;

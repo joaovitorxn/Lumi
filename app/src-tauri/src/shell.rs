@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -5,17 +6,23 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WindowEvent};
 
-use crate::popup::{click_action, popup_position, ClickAction, Rect};
+use crate::popup::{
+    click_action, popup_position, slide_start, slide_y, ClickAction, Rect, FRAME_MS, SLIDE_DISTANCE, SLIDE_MS,
+};
 use crate::service::DeviceService;
+#[cfg(windows)]
+use crate::vsync;
 
 const MAIN_WINDOW: &str = "main";
 const TRAY_ID: &str = "main";
 const REFRESH_EVERY: Duration = Duration::from_secs(10);
 
-/// When the popup was last hidden because it lost focus.
 #[derive(Default)]
 pub struct PopupState {
+    /// When the popup was last hidden because it lost focus.
     last_blur_hide: Mutex<Option<Instant>>,
+    /// Bumped on every slide-in so an older animation stops when a newer one starts.
+    slide_generation: AtomicU64,
 }
 
 pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -97,6 +104,8 @@ fn show_popup(app: &AppHandle, rect: Option<tauri::Rect>) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         return;
     };
+    // (x, start y, final y) of the slide-in, when the popup is anchored to the tray icon.
+    let mut slide: Option<(i32, i32, i32)> = None;
     match rect {
         Some(rect) => {
             let scale = window.scale_factor().unwrap_or(1.0);
@@ -117,7 +126,10 @@ fn show_popup(app: &AppHandle, rect: Option<tauri::Rect>) {
                 };
                 let screen = (monitor.size().width, monitor.size().height);
                 let (x, y) = popup_position(relative, (win.width, win.height), screen);
-                let _ = window.set_position(PhysicalPosition::new(x + origin.x, y + origin.y));
+                let (x, to_y) = (x + origin.x, y + origin.y);
+                let from_y = slide_start(to_y, pos.y, (SLIDE_DISTANCE * scale).round() as i32);
+                let _ = window.set_position(PhysicalPosition::new(x, from_y));
+                slide = Some((x, from_y, to_y));
             }
         }
         None => {
@@ -127,6 +139,73 @@ fn show_popup(app: &AppHandle, rect: Option<tauri::Rect>) {
     let _ = window.show();
     let _ = window.set_focus();
     let _ = app.emit("popup-shown", ());
+    if let Some((x, from_y, to_y)) = slide {
+        animate_slide(app.clone(), x, from_y, to_y);
+    }
+}
+
+/// Moves the window from `from_y` to `to_y` with a soft bounce. The window itself moves because the
+/// web view cannot fade a native window without flashing its last frame.
+///
+/// On Windows one thread draws a frame per display refresh (`DwmFlush`) and moves the window
+/// directly with `SetWindowPos`, so the motion runs at the monitor's own rate. Position follows the
+/// clock, not the frame count, so a late frame never slows the animation down.
+fn animate_slide(app: AppHandle, x: i32, from_y: i32, to_y: i32) {
+    let generation = app
+        .state::<PopupState>()
+        .slide_generation
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
+
+    #[cfg(windows)]
+    {
+        if let Some(hwnd) = app
+            .get_webview_window(MAIN_WINDOW)
+            .and_then(|window| window.hwnd().ok())
+        {
+            let hwnd = hwnd.0 as isize;
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                loop {
+                    let superseded = app
+                        .state::<PopupState>()
+                        .slide_generation
+                        .load(Ordering::SeqCst)
+                        != generation;
+                    if superseded || !vsync::is_visible(hwnd) {
+                        break;
+                    }
+                    let t = started.elapsed().as_millis() as f64 / SLIDE_MS as f64;
+                    vsync::move_to(hwnd, x, slide_y(from_y, to_y, t));
+                    if t >= 1.0 {
+                        break;
+                    }
+                    vsync::wait_next_frame();
+                }
+            });
+            return;
+        }
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let started = Instant::now();
+        loop {
+            let superseded =
+                app.state::<PopupState>().slide_generation.load(Ordering::SeqCst) != generation;
+            let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+                break;
+            };
+            if superseded || !window.is_visible().unwrap_or(false) {
+                break;
+            }
+            let t = started.elapsed().as_millis() as f64 / SLIDE_MS as f64;
+            let _ = window.set_position(PhysicalPosition::new(x, slide_y(from_y, to_y, t)));
+            if t >= 1.0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(FRAME_MS)).await;
+        }
+    });
 }
 
 /// While the popup is visible, push fresh device status to the UI every few seconds.

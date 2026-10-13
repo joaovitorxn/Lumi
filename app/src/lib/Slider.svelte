@@ -88,7 +88,9 @@
     cursor: default;
   }
 
-  /* Main: an inset track with a raised cream pill. The fill stops under the thumb's centre. */
+  /* Main: an inset track with a raised cream pill. The fill always ends at the thumb's centre. The thumb
+     is as tall as the track and has the same rounded end, so at 0% and 100% it sits exactly in the
+     track's end and hides the fill's edge: no sliver of colour at the start, no dark gap at the end. */
   .main input::-webkit-slider-runnable-track {
     height: 44px;
     border-radius: 22px;
@@ -103,10 +105,10 @@
   .main input::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 52px;
-    height: 36px;
-    margin-top: 4px;
+    height: 44px;
+    margin-top: 0;
     border: none;
-    border-radius: 18px;
+    border-radius: 22px;
     background:
       linear-gradient(90deg, transparent 0 41%, rgb(0 0 0 / 0.22) 41% 44%, transparent 44% 56%, rgb(0 0 0 / 0.22) 56% 59%, transparent 59%),
       linear-gradient(#f1ede6, #cfcac1);

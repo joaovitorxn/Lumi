@@ -102,6 +102,16 @@ describe('LightPanel tiles and fine controls', () => {
     expect(screen.getByRole('button', { name: /^Cor/ }).getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('keeps icon and label on one row above the value so the tile content fits its height', () => {
+    show();
+    for (const name of [/^Branco/, /^Cor/]) {
+      const tile = screen.getByRole('button', { name });
+      const head = tile.querySelector('.head');
+      expect(head?.querySelector('small')).toBeTruthy();
+      expect(head?.nextElementSibling?.tagName).toBe('B');
+    }
+  });
+
   it('the colour tile shows the hue name and saturation in colour mode', () => {
     show({ ...colour, hue: 280, saturation: 900 });
     const tile = screen.getByRole('button', { name: /^Cor/ });
