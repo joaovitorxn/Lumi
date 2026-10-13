@@ -12,7 +12,7 @@ const light: LightState = {
   saturation: 900,
   value: 800
 };
-const device: DeviceView = { id: 'lamp', name: 'Luz do PC', category: 'dj', online: true, light };
+const device: DeviceView = { id: 'lamp', name: 'Luz do PC', category: 'dj', online: true, light, camera: null };
 const colour: LightState = { ...light, mode: 'colour' };
 
 function show(state: LightState = light) {
@@ -24,7 +24,7 @@ function show(state: LightState = light) {
 describe('LightPanel readout', () => {
   it('shows the brightness percentage and the white tone', () => {
     show();
-    expect(screen.getByText('49')).toBeTruthy();
+    expect(screen.getByRole('img', { name: '49' })).toBeTruthy();
     expect(screen.getByText('Brilho', { selector: 'b' })).toBeTruthy();
     expect(screen.getByText('Branco quente')).toBeTruthy();
   });
@@ -32,13 +32,13 @@ describe('LightPanel readout', () => {
   it('names the colour in colour mode', () => {
     show({ ...colour, hue: 280 });
     expect(screen.getByText('Violeta')).toBeTruthy();
-    expect(screen.getByText('80')).toBeTruthy();
+    expect(screen.getByRole('img', { name: '80' })).toBeTruthy();
   });
 
   it('says the lamp is off and keeps its last brightness', () => {
     show({ ...light, on: false });
     expect(screen.getByText('Desligada')).toBeTruthy();
-    expect(screen.getByText('49')).toBeTruthy();
+    expect(screen.getByRole('img', { name: '49' })).toBeTruthy();
   });
 });
 
@@ -71,7 +71,7 @@ describe('LightPanel brightness', () => {
     const onaction = show();
     const slider = screen.getByLabelText('Brilho');
     await fireEvent.input(slider, { target: { value: '1000' } });
-    expect(screen.getByText('100', { selector: '.num' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: '100' })).toBeTruthy();
     expect(onaction).not.toHaveBeenCalled();
     await fireEvent.change(slider, { target: { value: '1000' } });
     expect(onaction).toHaveBeenCalledWith({ type: 'set_brightness', value: 1000 });

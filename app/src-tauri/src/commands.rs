@@ -1,5 +1,6 @@
 use tauri::State;
 
+use crate::devices::camera::CameraAction;
 use crate::devices::light::LightAction;
 use crate::devices::DeviceView;
 use crate::secrets::Credentials;
@@ -41,6 +42,23 @@ pub async fn send_light_command(
     action: LightAction,
 ) -> Result<(), CommandError> {
     service.send_light_command(&id, action).await
+}
+
+#[tauri::command]
+pub async fn send_camera_command(
+    service: State<'_, DeviceService>,
+    id: String,
+    action: CameraAction,
+) -> Result<(), CommandError> {
+    service.send_camera_command(&id, action).await
+}
+
+#[tauri::command]
+pub async fn camera_stream(
+    service: State<'_, DeviceService>,
+    id: String,
+) -> Result<String, CommandError> {
+    service.camera_stream(&id).await
 }
 
 /// Relabels the native tray menu when the UI language changes.

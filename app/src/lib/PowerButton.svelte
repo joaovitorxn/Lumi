@@ -39,7 +39,11 @@
     transition:
       transform 0.15s var(--ease-out),
       background 0.35s var(--ease-out),
-      color 0.35s var(--ease-out);
+      color 0.35s var(--ease-out),
+      filter 0.2s var(--ease-out);
+  }
+  .power:hover:not(:disabled) {
+    filter: brightness(1.12);
   }
   .power:active:not(:disabled) {
     transform: scale(0.94);

@@ -1,6 +1,6 @@
 import { toAppError, type Api } from './api';
 import { applyAction } from './light';
-import type { AppError, DeviceView, LightAction, Region } from './types';
+import type { AppError, CameraAction, DeviceView, LightAction, Region } from './types';
 
 export type Screen = 'devices' | 'settings' | 'credentials';
 
@@ -92,6 +92,29 @@ export class DeviceStore {
     }
   }
 
+  /** Movement is fire-and-forget; the toggles update the card at once and roll back on failure. */
+  async sendCamera(id: string, action: CameraAction) {
+    const before = this.devices.find((d) => d.id === id)?.camera;
+    if (!before) return;
+    const next =
+      action.type === 'set_private'
+        ? { ...before, private: action.on }
+        : action.type === 'set_motion_tracking'
+          ? { ...before, motion_tracking: action.on }
+          : before;
+    if (next !== before) this.setCamera(id, next);
+    this.inflight.set(id, (this.inflight.get(id) ?? 0) + 1);
+    try {
+      await this.api.sendCameraCommand(id, action);
+    } catch (e) {
+      if (next !== before) this.setCamera(id, before);
+      this.fail(toAppError(e));
+    } finally {
+      this.inflight.set(id, (this.inflight.get(id) ?? 1) - 1);
+      this.protectedUntil.set(id, this.now() + PROTECT_MS);
+    }
+  }
+
   async saveCredentials(accessId: string, accessSecret: string, region: Region) {
     await this.api.saveCredentials(accessId, accessSecret, region);
     this.configured = true;
@@ -136,10 +159,18 @@ export class DeviceStore {
   /** Server state wins, except for a lamp the user just commanded: that card keeps its local state. */
   private merge(fresh: DeviceView[]): DeviceView[] {
     return fresh.map((d) => {
-      if (!d.light || !this.isProtected(d.id)) return d;
+      if (!this.isProtected(d.id)) return d;
       const local = this.devices.find((x) => x.id === d.id);
-      return local?.light ? { ...d, light: local.light } : d;
+      return {
+        ...d,
+        light: d.light && local?.light ? local.light : d.light,
+        camera: d.camera && local?.camera ? local.camera : d.camera
+      };
     });
+  }
+
+  private setCamera(id: string, camera: DeviceView['camera']) {
+    this.devices = this.devices.map((d) => (d.id === id ? { ...d, camera } : d));
   }
 
   private setLight(id: string, light: DeviceView['light']) {

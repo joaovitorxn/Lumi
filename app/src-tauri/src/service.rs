@@ -4,6 +4,7 @@ use futures::future::join_all;
 use serde::Serialize;
 use tokio::sync::RwLock;
 
+use crate::devices::camera::{self, CameraAction, CATEGORY_CAMERA};
 use crate::devices::light::{commands_for, LightAction, CATEGORY_LIGHT};
 use crate::devices::{build_view, DeviceView};
 use crate::secrets::{Credentials, SecretStore, StoreError};
@@ -113,7 +114,8 @@ impl DeviceService {
         let views = join_all(devices.iter().map(|device| {
             let client = client.clone();
             async move {
-                let status = if device.category == CATEGORY_LIGHT && device.online {
+                let readable = device.category == CATEGORY_LIGHT || device.category == CATEGORY_CAMERA;
+                let status = if readable && device.online {
                     client.device_status(&device.id).await.ok()
                 } else {
                     None
@@ -123,6 +125,22 @@ impl DeviceService {
         }))
         .await;
         Ok(views)
+    }
+
+    /// A fresh, short-lived HLS URL for a camera.
+    pub async fn camera_stream(&self, id: &str) -> Result<String, CommandError> {
+        let client = self.client().await?;
+        Ok(client.stream_url(id, "HLS").await?)
+    }
+
+    pub async fn send_camera_command(
+        &self,
+        id: &str,
+        action: CameraAction,
+    ) -> Result<(), CommandError> {
+        let client = self.client().await?;
+        client.send_commands(id, &camera::commands_for(&action)).await?;
+        Ok(())
     }
 
     pub async fn send_light_command(
@@ -200,13 +218,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_devices_reads_status_only_for_online_lamps() {
+    async fn list_devices_reads_status_only_for_online_lamps_and_cameras() {
         let server = server_with_token().await;
         Mock::given(path("/v1.0/iot-01/associated-users/devices"))
             .respond_with(ok(json!({"devices": [
                 {"id": "lamp", "name": "Luz", "category": "dj", "online": true},
                 {"id": "off", "name": "Quarto", "category": "dj", "online": false},
-                {"id": "plug", "name": "Tomada", "category": "cz", "online": true}
+                {"id": "plug", "name": "Tomada", "category": "cz", "online": true},
+                {"id": "cam", "name": "Camera", "category": "sp", "online": true}
             ], "has_more": false})))
             .mount(&server)
             .await;
@@ -225,12 +244,18 @@ mod tests {
             .expect(0)
             .mount(&server)
             .await;
+        Mock::given(path("/v1.0/devices/cam/status"))
+            .respond_with(ok(json!([{"code": "basic_private", "value": true}])))
+            .expect(1)
+            .mount(&server)
+            .await;
 
         let views = service(&server).list_devices().await.unwrap();
-        assert_eq!(views.len(), 3);
+        assert_eq!(views.len(), 4);
         assert!(views[0].light.as_ref().unwrap().on);
         assert!(views[1].light.is_none() && !views[1].online);
         assert!(views[2].light.is_none() && views[2].online);
+        assert!(views[3].camera.as_ref().unwrap().private);
     }
 
     #[tokio::test]

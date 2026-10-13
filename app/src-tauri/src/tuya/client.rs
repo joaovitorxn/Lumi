@@ -124,6 +124,18 @@ impl TuyaClient {
         Ok(())
     }
 
+    /// Asks Tuya to open a live stream (`HLS`, `RTSP` or `FLV`) and returns its temporary URL.
+    pub async fn stream_url(&self, id: &str, kind: &str) -> Result<String, Error> {
+        let path = format!("/v1.0/devices/{id}/stream/actions/allocate");
+        let body = serde_json::json!({ "type": kind }).to_string();
+        let result = self.request(Method::POST, &path, &[], Some(body)).await?;
+        result
+            .get("url")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| Error::Decode("stream response without url".into()))
+    }
+
     async fn access_token(&self) -> Result<String, Error> {
         let mut guard = self.token.lock().await;
         if let Some(t) = guard.as_ref() {
@@ -439,6 +451,26 @@ mod tests {
             )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn stream_url_posts_the_type_and_returns_the_url() {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1.0/token"))
+            .respond_with(token_ok(7200))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1.0/devices/cam/stream/actions/allocate"))
+            .and(body_json(json!({"type": "HLS"})))
+            .respond_with(api_ok(json!({"url": "https://s/x.m3u8"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        assert_eq!(
+            client(&server).stream_url("cam", "HLS").await.unwrap(),
+            "https://s/x.m3u8"
+        );
     }
 
     /// Hits the real Tuya cloud to prove the signing scheme end to end.

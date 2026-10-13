@@ -15,12 +15,27 @@ export interface LightState {
   value: number;
 }
 
+export interface CameraState {
+  /** Privacy mode: the lens stops streaming. */
+  private: boolean;
+  motion_tracking: boolean;
+}
+
+export type Direction = 'up' | 'right' | 'down' | 'left';
+
+export type CameraAction =
+  | { type: 'ptz_move'; direction: Direction }
+  | { type: 'ptz_stop' }
+  | { type: 'set_private'; on: boolean }
+  | { type: 'set_motion_tracking'; on: boolean };
+
 export interface DeviceView {
   id: string;
   name: string;
   category: string;
   online: boolean;
   light: LightState | null;
+  camera: CameraState | null;
 }
 
 export type LightAction =

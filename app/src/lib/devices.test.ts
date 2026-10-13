@@ -12,7 +12,7 @@ const light: LightState = {
   saturation: 1000,
   value: 1000
 };
-const lamp: DeviceView = { id: 'lamp', name: 'Luz', category: 'dj', online: true, light };
+const lamp: DeviceView = { id: 'lamp', name: 'Luz', category: 'dj', online: true, light, camera: null };
 
 function fakeApi(over: Partial<Api> = {}): Api {
   return {
@@ -22,6 +22,8 @@ function fakeApi(over: Partial<Api> = {}): Api {
     sendLightCommand: vi.fn().mockResolvedValue(undefined),
     isAutostart: vi.fn().mockResolvedValue(false),
     setAutostart: vi.fn().mockResolvedValue(undefined),
+    sendCameraCommand: vi.fn().mockResolvedValue(undefined),
+    cameraStream: vi.fn().mockResolvedValue(''),
     setTrayLabels: vi.fn().mockResolvedValue(undefined),
     ...over
   };

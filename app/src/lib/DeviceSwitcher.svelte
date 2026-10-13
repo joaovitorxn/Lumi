@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tick } from 'svelte';
+  import Icon, { type IconName } from './Icon.svelte';
   import { t } from './i18n.svelte';
   import type { DeviceView } from './types';
 
@@ -8,123 +10,231 @@
     onselect
   }: { devices: DeviceView[]; selectedId: string; onselect: (id: string) => void } = $props();
 
-  let nav: HTMLElement | undefined = $state();
-  let fadeLeft = $state(false);
-  let fadeRight = $state(false);
+  let root: HTMLElement | undefined = $state();
+  let trigger: HTMLButtonElement | undefined = $state();
+  let open = $state(false);
 
-  function measure() {
-    if (!nav) return;
-    fadeLeft = nav.scrollLeft > 1;
-    fadeRight = nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 1;
+  const selected = $derived(devices.find((d) => d.id === selectedId) ?? devices[0]);
+
+  const icons: Record<string, IconName> = { dj: 'bulb', sp: 'camera', cz: 'plug' };
+  const iconFor = (category: string): IconName => icons[category] ?? 'device';
+
+  const options = () => Array.from(root?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
+
+  async function show() {
+    if (!devices.length) return;
+    open = true;
+    await tick();
+    (options().find((o) => o.getAttribute('aria-selected') === 'true') ?? options()[0])?.focus();
   }
 
-  /** A plain mouse wheel only scrolls vertically; map it onto the row when the row overflows. */
-  function wheel(e: WheelEvent) {
-    if (!nav || nav.scrollWidth <= nav.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+  function close(refocus = false) {
+    open = false;
+    if (refocus) trigger?.focus();
+  }
+
+  function choose(id: string) {
+    onselect(id);
+    close(true);
+  }
+
+  function triggerKey(e: KeyboardEvent) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      show();
+    }
+  }
+
+  function listKey(e: KeyboardEvent) {
+    const items = options();
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === 'ArrowDown') items[Math.min(items.length - 1, at + 1)]?.focus();
+    else if (e.key === 'ArrowUp') items[Math.max(0, at - 1)]?.focus();
+    else if (e.key === 'Home') items[0]?.focus();
+    else if (e.key === 'End') items[items.length - 1]?.focus();
+    else if (e.key === 'Escape') close(true);
+    else if (e.key === 'Tab') close();
+    else return;
     e.preventDefault();
-    nav.scrollLeft += e.deltaY;
+    e.stopPropagation();
   }
 
   $effect(() => {
-    const el = nav;
-    if (!el) return;
-    el.addEventListener('wheel', wheel, { passive: false });
-    el.addEventListener('scroll', measure, { passive: true });
-    measure();
-    return () => {
-      el.removeEventListener('wheel', wheel);
-      el.removeEventListener('scroll', measure);
+    if (!open) return;
+    const away = (e: PointerEvent) => {
+      if (!root?.contains(e.target as Node)) close();
     };
-  });
-
-  // Keep the chosen pill in view when there are more devices than fit.
-  $effect(() => {
-    void selectedId;
-    nav?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
+    window.addEventListener('pointerdown', away);
+    return () => window.removeEventListener('pointerdown', away);
   });
 </script>
 
-<!-- tabindex=-1 keeps the scroll container itself out of the Tab order; the pills are the stops. -->
-<nav aria-label={t('devices.nav')} tabindex="-1" class:fade-left={fadeLeft} class:fade-right={fadeRight} bind:this={nav}>
-  {#each devices as device (device.id)}
-    <button
-      class="pill"
-      class:lit={!!device.light?.on}
-      aria-current={device.id === selectedId ? 'true' : undefined}
-      onclick={() => onselect(device.id)}
-    >
-      <i aria-hidden="true"></i>{device.name}
-    </button>
-  {/each}
-</nav>
+<div class="switcher" bind:this={root}>
+  <button
+    bind:this={trigger}
+    type="button"
+    class="trigger"
+    class:open
+    aria-haspopup="listbox"
+    aria-expanded={open}
+    aria-label={t('devices.nav')}
+    disabled={!devices.length}
+    onclick={() => (open ? close() : show())}
+    onkeydown={triggerKey}
+  >
+    {#if selected}
+      <span class="kind" class:lit={!!selected.light?.on} class:on={!!selected.light?.on} aria-hidden="true">
+        <Icon name={iconFor(selected.category)} size={18} />
+      </span>
+      <span class="name">{selected.name}</span>
+    {/if}
+    <span class="chev" aria-hidden="true"><Icon name="chevron" size={16} /></span>
+  </button>
+
+  {#if open}
+    <div class="menu" role="listbox" aria-label={t('devices.nav')} tabindex="-1" onkeydown={listKey}>
+      {#each devices as device (device.id)}
+        <button
+          type="button"
+          class="option"
+          role="option"
+          tabindex="-1"
+          aria-selected={device.id === selected?.id}
+          onclick={() => choose(device.id)}
+        >
+          <span class="kind" class:lit={!!device.light?.on} aria-hidden="true">
+            <Icon name={iconFor(device.category)} size={18} />
+          </span>
+          <span class="name">{device.name}</span>
+          {#if device.id === selected?.id}<span class="tick" aria-hidden="true"><Icon name="check" size={16} /></span>{/if}
+        </button>
+      {/each}
+    </div>
+  {/if}
+</div>
 
 <style>
-  nav {
-    display: flex;
-    gap: 6px;
+  .switcher {
+    position: relative;
     min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-    /* The selected pill is scrolled in clear of the fades. */
-    scroll-padding-inline: 28px;
-    --fade-l: 0px;
-    --fade-r: 0px;
-    mask-image: linear-gradient(90deg, transparent, #000 var(--fade-l), #000 calc(100% - var(--fade-r)), transparent);
   }
-  nav.fade-left {
-    --fade-l: 22px;
-  }
-  nav.fade-right {
-    --fade-r: 22px;
-  }
-  nav::-webkit-scrollbar {
-    display: none;
-  }
-  .pill {
+  .trigger {
     display: flex;
     align-items: center;
-    gap: 7px;
-    flex: none;
-    height: 32px;
-    max-width: 150px;
-    padding: 0 12px 0 10px;
-    border-radius: 16px;
+    gap: 10px;
+    width: 100%;
+    height: 40px;
+    padding: 0 10px 0 14px;
+    border-radius: 20px;
     background: var(--surface);
     border: 1px solid var(--border);
-    color: var(--muted);
-    font-size: 12.5px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    color: var(--text);
+    font-size: 14px;
+    text-align: left;
     cursor: pointer;
     transition:
       background 0.25s var(--ease-out),
-      color 0.25s var(--ease-out),
       border-color 0.25s var(--ease-out);
   }
-  .pill:hover {
-    color: var(--text);
-  }
-  /* Inset ring: an outside ring would be clipped by the scrolling row. */
-  .pill:focus-visible {
-    outline-offset: -2px;
-  }
-  .pill[aria-current='true'] {
+  .trigger:hover:not(:disabled),
+  .trigger.open {
     background: var(--surface-hi);
     border-color: var(--border-strong);
+  }
+  .trigger:disabled {
+    cursor: default;
+  }
+  .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chev {
+    display: flex;
+    flex: none;
+    color: var(--muted);
+    transform: rotate(90deg);
+    transition: transform 0.25s var(--ease-out);
+  }
+  .open .chev {
+    transform: rotate(-90deg);
+  }
+
+  .menu {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    max-height: 232px;
+    overflow-y: auto;
+    padding: 6px;
+    border-radius: 18px;
+    background: linear-gradient(#1b1b1f, #151518);
+    border: 1px solid var(--border-strong);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.07),
+      0 12px 28px rgb(0 0 0 / 0.65);
+    animation: drop 0.2s var(--ease-out) both;
+  }
+  @keyframes drop {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+  }
+  .option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: 38px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background 0.2s var(--ease-out),
+      color 0.2s var(--ease-out);
+  }
+  .option:hover,
+  .option:focus-visible {
+    background: var(--surface-hi);
     color: var(--text);
   }
-  i {
-    width: 8px;
-    height: 8px;
+  .option:focus-visible {
+    outline-offset: -2px;
+  }
+  .option[aria-selected='true'] {
+    color: var(--text);
+  }
+  .tick {
+    display: flex;
     flex: none;
-    border-radius: 50%;
-    background: #3a3a3f;
+    color: var(--muted);
   }
-  .lit i {
-    background: #cfc9bf;
+
+  /* The icon says what the device is; a lit lamp's icon glows, in its own colour in the trigger. */
+  .kind {
+    display: flex;
+    flex: none;
+    color: #6b6a68;
+    transition: color 0.25s var(--ease-out);
   }
-  .pill[aria-current='true'].lit i {
-    background: rgb(var(--light));
+  .kind.lit {
+    color: #cfc9bf;
+  }
+  .trigger .kind.on {
+    color: rgb(var(--light));
+  }
+  .trigger .kind:not(.lit),
+  .option[aria-selected='true'] .kind:not(.lit) {
+    color: var(--muted);
   }
 </style>

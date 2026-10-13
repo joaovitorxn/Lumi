@@ -1,8 +1,10 @@
+pub mod camera;
 pub mod light;
 
 use serde::Serialize;
 
 use crate::tuya::{StatusItem, TuyaDevice};
+use camera::{parse_camera, CameraState, CATEGORY_CAMERA};
 use light::{parse_light, LightState, CATEGORY_LIGHT};
 
 /// What the UI sees for one device. `light` is present only for an online lamp whose status was read.
@@ -13,11 +15,17 @@ pub struct DeviceView {
     pub category: String,
     pub online: bool,
     pub light: Option<LightState>,
+    /// Present only for an online camera whose status was read.
+    pub camera: Option<CameraState>,
 }
 
 pub fn build_view(device: &TuyaDevice, status: Option<&[StatusItem]>) -> DeviceView {
     let light = match (device.category.as_str(), device.online, status) {
         (CATEGORY_LIGHT, true, Some(items)) => Some(parse_light(items)),
+        _ => None,
+    };
+    let camera = match (device.category.as_str(), device.online, status) {
+        (CATEGORY_CAMERA, true, Some(items)) => Some(parse_camera(items)),
         _ => None,
     };
     DeviceView {
@@ -26,6 +34,7 @@ pub fn build_view(device: &TuyaDevice, status: Option<&[StatusItem]>) -> DeviceV
         category: device.category.clone(),
         online: device.online,
         light,
+        camera,
     }
 }
 
@@ -67,8 +76,15 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_category_has_no_light_state_but_keeps_identity() {
+    fn online_camera_with_status_gets_camera_state() {
         let view = build_view(&device("sp", true), Some(&status()));
+        assert!(view.camera.is_some() && view.light.is_none());
+        assert!(build_view(&device("sp", false), Some(&status())).camera.is_none());
+    }
+
+    #[test]
+    fn unsupported_category_has_no_light_state_but_keeps_identity() {
+        let view = build_view(&device("cz", true), Some(&status()));
         assert!(view.light.is_none());
         assert_eq!((view.id.as_str(), view.name.as_str()), ("d1", "Luz"));
     }

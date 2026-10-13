@@ -12,6 +12,7 @@
     stepBrightness,
     warmthName
   } from './light';
+  import RollingNumber from './RollingNumber.svelte';
   import Slider from './Slider.svelte';
   import type { DeviceView, LightAction, LightState } from './types';
 
@@ -64,7 +65,7 @@
   </div>
 
   <div class="readout">
-    <div class="num">{brightnessPct(shown)}<sup>%</sup></div>
+    <div class="num"><RollingNumber value={brightnessPct(shown)} /><sup>%</sup></div>
     <div class="what">
       <b>{light.on ? t('light.brightness') : t('light.off')}</b>
       <span>{caption}</span>
@@ -163,7 +164,7 @@
   .hero {
     flex: 1 1 auto;
     min-height: 88px;
-    padding-top: 6px;
+    padding-top: 18px;
   }
 
   .readout {
@@ -232,7 +233,14 @@
       0 2px 4px rgb(0 0 0 / 0.5);
     color: var(--muted);
     cursor: pointer;
-    transition: transform 0.15s var(--ease-out);
+    transition:
+      transform 0.15s var(--ease-out),
+      color 0.2s var(--ease-out),
+      border-color 0.2s var(--ease-out);
+  }
+  .step:hover:not(:disabled) {
+    color: var(--text);
+    border-color: #3d3d44;
   }
   .step:active:not(:disabled) {
     transform: scale(0.92);
@@ -267,6 +275,10 @@
       background 0.25s var(--ease-out),
       box-shadow 0.25s var(--ease-out),
       transform 0.15s var(--ease-out);
+  }
+  .tile:hover:not(:disabled):not(.sel) {
+    border-color: var(--border-strong);
+    background: linear-gradient(#202024, #18181b);
   }
   .tile:active:not(:disabled) {
     transform: scale(0.98);

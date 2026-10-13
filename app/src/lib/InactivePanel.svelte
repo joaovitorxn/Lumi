@@ -29,7 +29,7 @@
   .hero {
     flex: 1 1 auto;
     min-height: 120px;
-    padding-top: 6px;
+    padding-top: 18px;
     opacity: 0.8;
   }
   .text {

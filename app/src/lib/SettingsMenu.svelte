@@ -111,7 +111,14 @@
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.08),
       0 2px 4px rgb(0 0 0 / 0.5);
-    transition: transform 0.15s var(--ease-out);
+    transition:
+      transform 0.15s var(--ease-out),
+      color 0.2s var(--ease-out),
+      border-color 0.2s var(--ease-out);
+  }
+  .back:hover {
+    color: var(--text);
+    border-color: #3d3d44;
   }
   .back:active {
     transform: scale(0.92);
@@ -142,7 +149,17 @@
     gap: 12px;
   }
   .link {
-    transition: transform 0.15s var(--ease-out);
+    transition:
+      transform 0.15s var(--ease-out),
+      border-color 0.2s var(--ease-out),
+      background 0.2s var(--ease-out);
+  }
+  .link:hover {
+    border-color: var(--border-strong);
+    background: linear-gradient(#202024, #18181b);
+  }
+  .link:hover .chev {
+    color: var(--text);
   }
   .link:active {
     transform: scale(0.98);
@@ -199,6 +216,10 @@
       background 0.25s var(--ease-out),
       color 0.25s var(--ease-out);
   }
+  .seg button:hover:not(.sel) {
+    color: var(--text);
+    background: rgb(255 255 255 / 0.05);
+  }
   .seg button.sel {
     color: #1d1a15;
     font-weight: 600;
@@ -233,8 +254,17 @@
       0 2px 4px rgb(0 0 0 / 0.6);
     transition: transform 0.3s var(--ease-out);
   }
+  .switch:hover:not(.on) {
+    background: #131316;
+  }
+  .switch:hover i {
+    filter: brightness(1.08);
+  }
   .switch.on {
     background: var(--ok);
+  }
+  .switch.on:hover {
+    background: color-mix(in srgb, var(--ok) 88%, white);
   }
   .switch.on i {
     transform: translateX(22px);

@@ -192,7 +192,13 @@
     border: 1px solid transparent;
     font-weight: 600;
     cursor: pointer;
-    transition: transform 0.15s var(--ease-out);
+    transition:
+      transform 0.15s var(--ease-out),
+      filter 0.2s var(--ease-out),
+      color 0.2s var(--ease-out);
+  }
+  .actions button:hover:not(:disabled) {
+    filter: brightness(1.08);
   }
   .actions button:active:not(:disabled) {
     transform: scale(0.96);

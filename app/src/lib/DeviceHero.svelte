@@ -27,6 +27,7 @@
   aria-hidden="true"
 >
   {#if kind === 'light'}
+    <span class="halo" aria-hidden="true"><i></i><i></i></span>
     <span class="pool"></span>
     <svg viewBox="0 0 120 160" role="presentation">
       <defs>
@@ -142,6 +143,44 @@
   [data-state='on'] .pool {
     opacity: calc(0.25 + 0.75 * var(--level, 1));
     transform: translateX(-50%) scaleX(1);
+  }
+
+  /* Light breathing out of the bulb: two soft discs pulsing out of step, so the glow never repeats in lockstep. */
+  .halo {
+    position: absolute;
+    left: 50%;
+    top: 36%;
+    width: 260px;
+    height: 260px;
+    margin: -130px 0 0 -130px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.6s var(--ease-out);
+  }
+  [data-state='on'] .halo {
+    opacity: calc(0.3 + 0.7 * var(--level, 1));
+  }
+  .halo i {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgb(var(--light) / 0.5), rgb(var(--light) / 0.16) 45%, transparent 70%);
+    animation: breathe 3.6s ease-in-out infinite alternate;
+  }
+  .halo i:last-child {
+    animation-duration: 5.4s;
+    animation-delay: -2s;
+    transform: scale(0.8);
+  }
+  @keyframes breathe {
+    from {
+      opacity: 0.45;
+      transform: scale(0.72);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1.08);
+    }
   }
 
   .core {

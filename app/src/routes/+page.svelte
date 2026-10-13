@@ -3,6 +3,8 @@
   import { t } from '$lib/i18n.svelte';
   import { onDevicesError, onDevicesUpdated, onOpenSettings, onPopupShown, tauriApi } from '$lib/api';
   import { DeviceStore } from '$lib/devices.svelte';
+  import type { DeviceView } from '$lib/types';
+  import CameraPanel from '$lib/CameraPanel.svelte';
   import DeviceSwitcher from '$lib/DeviceSwitcher.svelte';
   import InactivePanel from '$lib/InactivePanel.svelte';
   import { lampLight } from '$lib/light';
@@ -18,6 +20,12 @@
   let selectedId = $state('');
   const selected = $derived(store.devices.find((d) => d.id === selectedId) ?? store.devices[0]);
   /** The focused lamp's light tints the whole window, so the colour on screen is always the real one. */
+  /** The power button stays rendered while it slides away, so it does not vanish before the dropdown has grown. */
+  let lastLamp = $state<DeviceView>();
+  $effect(() => {
+    if (selected?.light) lastLamp = selected;
+  });
+  const powerDevice = $derived(selected?.light ? selected : lastLamp);
   const target = $derived(selected?.light ? lampLight(selected.light) : undefined);
   const look = tweenedLook(() => target, lampLight({ on: false } as never));
 
@@ -60,14 +68,17 @@
   {:else}
     <header>
       <DeviceSwitcher devices={store.devices} selectedId={selected?.id ?? ''} onselect={(id) => (selectedId = id)} />
-      {#if selected?.light}
-        {@const light = selected.light}
-        <PowerButton
-          name={selected.name}
-          on={light.on}
-          onclick={() => store.sendLight(selected.id, { type: 'set_power', on: !light.on })}
-        />
-      {/if}
+      <div class="power-slot" class:open={!!selected?.light} inert={!selected?.light}>
+        {#if powerDevice?.light}
+          {@const lamp = powerDevice}
+          {@const light = powerDevice.light}
+          <PowerButton
+            name={lamp.name}
+            on={light.on}
+            onclick={() => store.sendLight(lamp.id, { type: 'set_power', on: !light.on })}
+          />
+        {/if}
+      </div>
     </header>
 
     {#if selected}
@@ -75,6 +86,8 @@
         <div class="stage">
           {#if selected.light}
             <LightPanel device={selected} light={selected.light} stale={!!store.error} onaction={(a) => store.sendLight(selected.id, a)} />
+          {:else if selected.camera}
+            <CameraPanel device={selected} camera={selected.camera} onaction={(a) => store.sendCamera(selected.id, a)} />
           {:else}
             <InactivePanel device={selected} />
           {/if}
@@ -118,14 +131,34 @@
 
   header {
     position: relative;
+    /* Above the stage, so the open device list is not painted under it. */
+    z-index: 5;
     flex: none;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
     padding: 16px 16px 0;
   }
-  header :global(nav) {
+  /* Opens to the power button's width, so the dropdown eases between full width and sharing the row. */
+  .power-slot {
+    flex: none;
+    width: 0;
+    margin-left: 0;
+    opacity: 0;
+    transform: scale(0.8);
+    transition:
+      width 0.4s var(--ease-out),
+      margin-left 0.4s var(--ease-out),
+      opacity 0.3s var(--ease-out),
+      transform 0.4s var(--ease-out);
+  }
+  .power-slot.open {
+    width: 42px;
+    margin-left: 10px;
+    opacity: 1;
+    transform: none;
+  }
+  header :global(.switcher) {
     flex: 1;
   }
 

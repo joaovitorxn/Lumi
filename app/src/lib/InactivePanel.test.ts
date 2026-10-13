@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import InactivePanel from './InactivePanel.svelte';
 import type { DeviceView } from './types';
 
-const base: DeviceView = { id: 'x', name: 'Corredor', category: 'dj', online: true, light: null };
+const base: DeviceView = { id: 'x', name: 'Corredor', category: 'dj', online: true, light: null, camera: null };
 
 describe('InactivePanel', () => {
   it('shows the device name and why it has no controls', () => {

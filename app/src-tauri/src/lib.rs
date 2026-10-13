@@ -30,6 +30,8 @@ pub fn run() {
             commands::save_credentials,
             commands::list_devices,
             commands::send_light_command,
+            commands::camera_stream,
+            commands::send_camera_command,
             commands::set_tray_labels
         ])
         .setup(|app| shell::setup(app))
