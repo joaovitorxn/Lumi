@@ -85,6 +85,27 @@ describe('LightCard', () => {
     expect(onaction).toHaveBeenCalledWith({ type: 'set_power', on: false });
   });
 
+  it('dragging the brightness slider updates the readout live and sends only on release', async () => {
+    const onaction = vi.fn();
+    render(LightCard, { device, light, onaction });
+    await fireEvent.click(screen.getByRole('button', { name: 'Ajustes de Luz do PC' }));
+    const slider = screen.getByLabelText('Brilho');
+    expect(screen.getByText('49%')).toBeTruthy();
+    await fireEvent.input(slider, { target: { value: '1000' } });
+    expect(screen.getByText('100%')).toBeTruthy();
+    expect(onaction).not.toHaveBeenCalled();
+    await fireEvent.change(slider, { target: { value: '1000' } });
+    expect(onaction).toHaveBeenCalledWith({ type: 'set_brightness', value: 1000 });
+  });
+
+  it('the expand button reports its state to assistive tech', async () => {
+    render(LightCard, { device, light, onaction: vi.fn() });
+    const expand = screen.getByRole('button', { name: 'Ajustes de Luz do PC' });
+    expect(expand.getAttribute('aria-expanded')).toBe('false');
+    await fireEvent.click(expand);
+    expect(expand.getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('brightness in colour mode sends the whole colour, never a bare brightness', async () => {
     const onaction = vi.fn();
     render(LightCard, { device, light: { ...light, mode: 'colour' }, onaction });

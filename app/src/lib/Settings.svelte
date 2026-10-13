@@ -35,8 +35,12 @@
 </script>
 
 <form onsubmit={submit}>
-  <h2>Credenciais Tuya</h2>
-  <p class="hint">Copie do projeto em iot.tuya.com (aba Overview). Ficam guardadas no Gerenciador de Credenciais do Windows.</p>
+  <header>
+    <h2>Credenciais Tuya</h2>
+    <p class="hint">
+      Copie do projeto em iot.tuya.com (aba Overview). Ficam guardadas no Gerenciador de Credenciais do Windows.
+    </p>
+  </header>
 
   <label>
     Access ID
@@ -60,7 +64,7 @@
 
   <div class="actions">
     {#if oncancel}<button type="button" class="ghost" onclick={oncancel}>Cancelar</button>{/if}
-    <button type="submit" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
+    <button type="submit" class="primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
   </div>
 </form>
 
@@ -68,31 +72,53 @@
   form {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 16px;
+    animation: rise 0.4s var(--ease-out) both;
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
   }
   h2 {
-    margin: 0;
-    font-size: 16px;
+    margin: 0 0 6px;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
   }
   .hint {
     margin: 0;
     font-size: 12px;
     color: var(--muted);
+    max-width: 38ch;
   }
   label {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     font-size: 12px;
     color: var(--muted);
   }
   input,
   select {
-    padding: 8px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
     background: var(--surface);
     color: var(--text);
+    font: inherit;
+    transition: border-color 0.2s;
+  }
+  input:hover,
+  select:hover {
+    border-color: rgb(255 255 255 / 0.22);
+  }
+  input:focus-visible,
+  select:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
   }
   .error {
     margin: 0;
@@ -104,20 +130,36 @@
     gap: 8px;
     justify-content: flex-end;
   }
-  button {
-    padding: 8px 14px;
-    border-radius: 8px;
-    border: none;
-    background: var(--accent);
-    color: #fff;
+  .actions button {
+    padding: 10px 18px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
     cursor: pointer;
+    transition:
+      transform 0.15s var(--ease-out),
+      background 0.2s;
   }
-  button.ghost {
-    background: transparent;
-    border: 1px solid var(--border);
+  .actions button:active {
+    transform: scale(0.97);
+  }
+  .primary {
+    background: var(--accent);
+    color: #2a1a00;
+    font-weight: 600;
+  }
+  .primary:hover {
+    background: color-mix(in srgb, var(--accent) 88%, #fff);
+  }
+  .ghost {
+    background: none;
+    border-color: var(--border-strong);
     color: var(--text);
+  }
+  .ghost:hover {
+    background: var(--surface-hi);
   }
   button:disabled {
     opacity: 0.6;
+    cursor: default;
   }
 </style>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DeviceIcon from './DeviceIcon.svelte';
   import type { DeviceView } from './types';
 
   let { device }: { device: DeviceView } = $props();
@@ -9,11 +10,11 @@
 </script>
 
 <article class="card">
-  <div class="dot"></div>
-  <div class="name">
+  <DeviceIcon category={device.category} />
+  <span class="name">
     <strong>{device.name}</strong>
     <span>{reason}</span>
-  </div>
+  </span>
 </article>
 
 <style>
@@ -21,18 +22,9 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--surface);
-    opacity: 0.55;
-  }
-  .dot {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: #3b4050;
-    flex: none;
+    padding: 10px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius);
   }
   .name {
     display: flex;
@@ -40,9 +32,13 @@
     min-width: 0;
   }
   .name strong {
+    display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: 600;
+    font-size: 15px;
+    color: #c3c8d4;
   }
   .name span {
     font-size: 12px;
