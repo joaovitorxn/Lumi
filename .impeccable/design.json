@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-10-12T00:00:00Z",
-  "title": "Design System: Positivo Desktop",
+  "title": "Design System: Lumi",
   "extensions": {
     "colorMeta": {
       "ground": { "role": "neutral", "displayName": "Graphite Ground", "canonical": "#0d0d0f", "tonalRamp": ["#070708", "#0d0d0f", "#17171a", "#1f1f23", "#2e2e33", "#5d5b57", "#8c8a86", "#ece8e1"] },

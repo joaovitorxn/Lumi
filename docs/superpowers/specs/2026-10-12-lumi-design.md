@@ -1,4 +1,4 @@
-# Positivo Tray: design da v1
+# Lumi: design da v1
 
 Data: 2026-10-12
 
@@ -10,7 +10,7 @@ Quem usa: o próprio dono dos dispositivos, em um único PC. Sucesso na v1: abri
 
 ## Contexto e descobertas do spike
 
-- Os dispositivos Positivo Casa Inteligente rodam sobre a nuvem Tuya. O app Positivo é uma versão de marca própria (white-label): não permite vincular a conta a um projeto Tuya IoT (não há leitor de QR code compatível).
+- Os dispositivos Tuya rodam sobre a nuvem Tuya. O app do fabricante é uma versão de marca própria (white-label): não permite vincular a conta a um projeto Tuya IoT (não há leitor de QR code compatível).
 - Contornamos isso migrando o dispositivo para o app **Smart Life** (também Tuya). A conta Smart Life foi vinculada a um projeto em iot.tuya.com (serviços ativos: IoT Core, Authorization Token Management, Smart Home Basic Service, Device Status Notification).
 - Validado com a lâmpada `Smart Lâmpada Wi-Fi V4` (categoria `dj`): a API `/v1.0/iot-01/associated-users/devices` lista o dispositivo e comandos `switch_led` pela nuvem funcionam.
 - Varredura da LAN não encontrou RTSP/ONVIF (portas 554/8554/8000) em nenhum host. Vídeo da câmera 360 Bot, se possível, virá pela nuvem Tuya.
@@ -81,7 +81,7 @@ A interface (Svelte) conversa com o núcleo por comandos e eventos do Tauri e n�
 
 ## Riscos e pontos em aberto
 
-- **Dependência do Smart Life.** Dispositivos só aparecem na API se estiverem pareados no Smart Life, não no app Positivo. Cada dispositivo migrado deixa de aparecer no app Positivo.
+- **Dependência do Smart Life.** Dispositivos só aparecem na API se estiverem pareados no Smart Life, não no app do fabricante. Cada dispositivo migrado deixa de aparecer no app do fabricante.
 - **Câmera.** Ainda não migrada. Não está confirmado que a API entregue stream e PTZ para a 360 Bot, nem que o serviço de vídeo esteja disponível no projeto Tuya. Será investigado na etapa da câmera.
 - **Plano gratuito da Tuya.** O projeto usa o pacote básico gratuito do IoT Core, que tem limites de chamadas e prazo de validade de serviços. O app deve evitar consultas desnecessárias (já contemplado: sem polling com a janela fechada). Confirmar os limites vigentes no console da Tuya antes de depender do app no dia a dia.
-- **Reverse engineering do app Positivo** continua como plano B, caso a migração para o Smart Life deixe de funcionar para algum modelo.
+- **Reverse engineering do app do fabricante** continua como plano B, caso a migração para o Smart Life deixe de funcionar para algum modelo.

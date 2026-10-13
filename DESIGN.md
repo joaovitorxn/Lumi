@@ -1,5 +1,5 @@
 ---
-name: Positivo Desktop
+name: Lumi
 description: Tray popup for smart lamps. Graphite instrument panel where the only colour is the focused lamp's own light.
 colors:
   ground: "#0d0d0f"
@@ -109,7 +109,7 @@ components:
     padding: "10px 12px"
 ---
 
-# Design System: Positivo Desktop
+# Design System: Lumi
 
 ## Overview
 

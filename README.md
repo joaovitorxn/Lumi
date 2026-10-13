@@ -1,61 +1,63 @@
 <div align="center">
 
+<img src="docs/logo.svg" width="128" alt="Lumi logo" />
+
 # Lumi
 
-**Controle suas lâmpadas inteligentes direto da bandeja do Windows.**
+**Control your smart lights right from the Windows tray.**
 
-Um clique no ícone, a luz muda. Sem pegar o celular.
+One click on the icon, the light changes. No phone needed.
 
 ![Windows](https://img.shields.io/badge/Windows-11-0078D4?logo=windows&logoColor=white)
 ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)
 ![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)
-![Rust](https://img.shields.io/badge/Rust-núcleo-000000?logo=rust&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-core-000000?logo=rust&logoColor=white)
 
-<img src="docs/screenshots/light-warm.png" width="300" alt="Lumi controlando uma lâmpada em branco quente" />
+<img src="docs/screenshots/light-warm.png" width="300" alt="Lumi controlling a lamp in warm white" />
 
 </div>
 
-## O que é
+## What it is
 
-Lumi é um app de bandeja para Windows que controla dispositivos **Positivo Casa Inteligente** (Tuya) pela nuvem. O popup abre ao lado do relógio, mostra um aparelho por vez e sempre exibe o estado real da lâmpada.
+Lumi is a Windows tray app that controls **Tuya** smart devices through the cloud. The popup opens next to the clock, shows one device at a time and always reflects the lamp's real state.
 
-## Recursos
+## Features
 
-- **Brilho, temperatura e cor** com sliders táteis. A cor da luz tinge a janela inteira.
-- **A ilustração da lâmpada acompanha o brilho** e a cor escolhidos, com transições suaves.
-- **Vários aparelhos**: troque entre eles pelas pílulas no topo; liga/desliga em um botão.
-- **Estado sempre verdadeiro**: atualização automática a cada 10 s e indicação clara de sincronizado, atualizando ou erro.
-- **Três idiomas**: Português, English e Español, inclusive no menu da bandeja.
-- **Iniciar com o Windows** com um interruptor.
-- **Credenciais seguras**: ficam no Gerenciador de Credenciais do Windows, nunca em arquivo.
+- **Brightness, temperature and colour** with tactile sliders. The light's colour tints the whole window.
+- **The lamp illustration follows the brightness** and colour you set, with smooth transitions.
+- **Multiple devices**: switch between them with the pills at the top, and turn them on or off with one button.
+- **Always-true state**: refreshes automatically every 10 s and clearly shows synced, updating or error.
+- **Three languages**: Português, English and Español, including the tray menu.
+- **Start with Windows** behind a single switch.
+- **Safe credentials**: stored in Windows Credential Manager, never in a file.
 
-## Capturas de tela
+## Screenshots
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/light-warm.png" width="240" /><br/><sub>Branco quente</sub></td>
-    <td align="center"><img src="docs/screenshots/light-cool.png" width="240" /><br/><sub>Branco frio</sub></td>
-    <td align="center"><img src="docs/screenshots/light-colour.png" width="240" /><br/><sub>Cor</sub></td>
+    <td align="center"><img src="docs/screenshots/light-warm.png" width="240" /><br/><sub>Warm white</sub></td>
+    <td align="center"><img src="docs/screenshots/light-cool.png" width="240" /><br/><sub>Cool white</sub></td>
+    <td align="center"><img src="docs/screenshots/light-colour.png" width="240" /><br/><sub>Colour</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/light-off.png" width="240" /><br/><sub>Desligada</sub></td>
-    <td align="center"><img src="docs/screenshots/settings.png" width="240" /><br/><sub>Configurações</sub></td>
-    <td align="center"><img src="docs/screenshots/credentials.png" width="240" /><br/><sub>Credenciais Tuya</sub></td>
+    <td align="center"><img src="docs/screenshots/light-off.png" width="240" /><br/><sub>Off</sub></td>
+    <td align="center"><img src="docs/screenshots/settings.png" width="240" /><br/><sub>Settings</sub></td>
+    <td align="center"><img src="docs/screenshots/credentials.png" width="240" /><br/><sub>Tuya credentials</sub></td>
   </tr>
 </table>
 
-## Como funciona
+## How it works
 
-O Lumi fala com a **API em nuvem da Tuya**. Não há protocolo local nem `local_key`.
+Lumi talks to the **Tuya cloud API**. There is no local protocol and no `local_key`.
 
-1. Pareie os aparelhos no app **Smart Life** (o app da Positivo não permite vincular a conta a um projeto Tuya IoT).
-2. Em [iot.tuya.com](https://iot.tuya.com), crie um projeto e vincule a conta do Smart Life (*Devices → Link App Account*).
-3. Ative os serviços **IoT Core**, **Authorization Token Management** e **Smart Home Basic Service**.
-4. Abra o Lumi e informe **Access ID**, **Access Secret** e a região do projeto.
+1. Pair your devices in the **Smart Life** app (some white-label vendor apps do not let you link their account to a Tuya IoT project).
+2. On [iot.tuya.com](https://iot.tuya.com), create a project and link your Smart Life account (*Devices → Link App Account*).
+3. Enable the **IoT Core**, **Authorization Token Management** and **Smart Home Basic Service** APIs.
+4. Open Lumi and enter the project's **Access ID**, **Access Secret** and region.
 
-## Desenvolvimento
+## Development
 
-Pré-requisitos: [Rust](https://rustup.rs), [Node.js](https://nodejs.org) e o WebView2 do Windows.
+Requirements: [Rust](https://rustup.rs), [Node.js](https://nodejs.org) and the Windows WebView2 runtime.
 
 ```bash
 cd app
@@ -63,28 +65,28 @@ npm install
 npm run tauri dev
 ```
 
-Testes:
+Tests:
 
 ```bash
-npm test                      # interface (Vitest)
-cd src-tauri && cargo test    # núcleo Rust
+npm test                      # UI (Vitest)
+cd src-tauri && cargo test    # Rust core
 ```
 
-Para gerar o instalador:
+Build the installer:
 
 ```bash
 npm run tauri build
 ```
 
-## Estrutura
+## Project layout
 
-| Pasta | Conteúdo |
+| Folder | Contents |
 | --- | --- |
-| `app/src` | Interface em SvelteKit + Svelte 5 |
-| `app/src-tauri` | Núcleo em Rust: cliente Tuya, bandeja, credenciais |
-| `docs` | Especificação, plano e capturas de tela |
-| `spike` | Scripts Python usados para explorar a API Tuya |
+| `app/src` | UI built with SvelteKit and Svelte 5 |
+| `app/src-tauri` | Rust core: Tuya client, tray, credentials |
+| `docs` | Spec, plan and screenshots (Portuguese) |
+| `spike` | Python scripts used to explore the Tuya API |
 
-## Aviso
+## Disclaimer
 
-Projeto independente, sem vínculo com a Positivo nem com a Tuya.
+Independent project, not affiliated with Tuya.

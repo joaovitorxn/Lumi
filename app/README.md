@@ -1,25 +1,25 @@
 # Lumi
 
-App de bandeja do Windows para controlar dispositivos Positivo Casa Inteligente (Tuya) pela nuvem.
+Windows tray app to control Tuya smart devices through the cloud.
 
-## Pré-requisitos
+## Requirements
 
-- Os dispositivos precisam estar pareados no app **Smart Life** (o app Positivo não deixa vincular a conta a um projeto Tuya IoT).
-- Projeto em iot.tuya.com com a conta do Smart Life vinculada (Devices → Link App Account) e os serviços IoT Core, Authorization Token Management e Smart Home Basic Service ativos.
-- Rust, Node.js e o WebView2 do Windows.
+- Devices must be paired in the **Smart Life** app (some white-label vendor apps do not let you link their account to a Tuya IoT project).
+- A project on iot.tuya.com with the Smart Life account linked (Devices → Link App Account) and the IoT Core, Authorization Token Management and Smart Home Basic Service APIs enabled.
+- Rust, Node.js and the Windows WebView2 runtime.
 
-## Rodar
+## Run
 
     npm install
     npm run tauri dev
 
-Na primeira execução, informe Access ID, Access Secret e a região do projeto. Ficam no Gerenciador de Credenciais do Windows.
+On first launch, enter the project's Access ID, Access Secret and region. They are stored in Windows Credential Manager.
 
-## Testes
+## Tests
 
     npm test                      # frontend
-    cd src-tauri && cargo test    # núcleo Rust
+    cd src-tauri && cargo test    # Rust core
 
-Teste ao vivo contra a API Tuya (usa variáveis de ambiente `TUYA_ACCESS_ID`, `TUYA_ACCESS_KEY`, `TUYA_REGION`):
+Live test against the Tuya API (uses the environment variables `TUYA_ACCESS_ID`, `TUYA_ACCESS_KEY`, `TUYA_REGION`):
 
     cargo test live_smoke -- --ignored --nocapture
