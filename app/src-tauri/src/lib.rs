@@ -1,3 +1,5 @@
+mod commands;
+mod service;
 mod secrets;
 mod devices;
 mod tuya;
