@@ -37,17 +37,9 @@ Lumi is a Windows tray app that controls **Tuya** smart lights and cameras throu
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/light-warm.png" width="240" /><br/><sub>Warm white</sub></td>
-    <td align="center"><img src="docs/screenshots/light-cool.png" width="240" /><br/><sub>Cool white</sub></td>
-    <td align="center"><img src="docs/screenshots/light-colour.png" width="240" /><br/><sub>Colour</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/light-off.png" width="240" /><br/><sub>Off</sub></td>
-    <td align="center"><img src="docs/screenshots/settings.png" width="240" /><br/><sub>Settings</sub></td>
-    <td align="center"><img src="docs/screenshots/credentials.png" width="240" /><br/><sub>Tuya credentials</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/camera.png" width="240" /><br/><sub>Camera (video blurred)</sub></td>
+    <td align="center"><img src="docs/screenshots/light-colour.png" width="240" alt="Colour mode" /><br/><sub>Colour</sub></td>
+    <td align="center"><img src="docs/screenshots/devices.png" width="240" alt="Device dropdown" /><br/><sub>Devices</sub></td>
+    <td align="center"><img src="docs/screenshots/camera.png" width="240" alt="Camera with live video, blurred here" /><br/><sub>Camera (video blurred)</sub></td>
   </tr>
 </table>
 
