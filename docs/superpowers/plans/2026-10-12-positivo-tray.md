@@ -1,0 +1,3547 @@
+# Positivo Tray Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Um app de bandeja do Windows que lista os dispositivos Tuya do usuário em cards e controla a lâmpada (liga/desliga, brilho, temperatura, cor) pela nuvem Tuya.
+
+**Architecture:** Núcleo em Rust (Tauri v2) com quatro módulos de fronteiras claras: `tuya` (cliente assinado da API de nuvem), `devices` (um driver por categoria; só `dj` na v1), `secrets` (Gerenciador de Credenciais do Windows) e `shell` (tray + janela popup). A interface Svelte conversa com o núcleo por comandos e eventos do Tauri e nunca vê códigos Tuya.
+
+**Tech Stack:** Tauri 2 (Rust, edição 2024), reqwest (rustls), tokio, hmac/sha2, keyring 3, wiremock (testes); Svelte 5 + TypeScript (esqueleto SvelteKit SPA do `create-tauri-app`), vitest + @testing-library/svelte.
+
+**Spec:** `docs/superpowers/specs/2026-10-12-positivo-tray-design.md`
+
+> **Todo o código deste plano foi compilado e testado antes de ser escrito aqui** (45 testes Rust, 31 testes de frontend, `svelte-check` sem erros, build do frontend, teste ao vivo contra a API Tuya e teste do Gerenciador de Credenciais). Se algo divergir do que o plano promete, pare e investigue em vez de adaptar.
+
+## Global Constraints
+
+- Tauri v2, núcleo em Rust, interface em TypeScript com Svelte e Vite. O app vive em `app/` na raiz do repositório (`C:\Users\joaov\positivo-desktop`).
+- Credenciais Tuya (Access ID, Access Secret, região) ficam **somente** no Gerenciador de Credenciais do Windows. Nunca em arquivo, log, variável de ambiente do app ou código. Nunca registrar o secret em log.
+- v1 usa **só a nuvem Tuya**. Sem protocolo local, sem `local_key`.
+- Só a categoria Tuya `dj` (lâmpada) tem controles na v1. Outras categorias aparecem como cartão cinza "Ainda não suportado".
+- Sem consulta à API com a janela fechada. Enquanto aberta, atualização a cada 10 s.
+- Regiões válidas: `us`, `eu`, `cn`, `in` (minúsculas). Escalas Tuya: `bright_value_v2` 10-1000, `temp_value_v2` 0-1000 (0 quente, 1000 frio), `colour_data_v2` com `h` 0-360, `s` 0-1000, `v` 10-1000.
+- Textos da interface em português do Brasil.
+- Quem roda o app digita as próprias credenciais na tela de Configurações. Nenhum agente deve ler `spike/.env` para preencher a interface em nome da pessoa.
+- Fora da v1: câmera, controle local por LAN, planta da casa, outros tipos de dispositivo.
+
+## Review Focus
+
+Entradas e condições que o spec sugere mas nenhuma tarefa de "caminho feliz" exercita, da mais provável para a menos provável. Cada linha tem um teste na tarefa dona do código.
+
+1. **Credenciais coladas com espaço ou quebra de linha no fim** (acontece ao copiar do console Tuya): devem ser aparadas antes de salvar. Teste: `saved_credentials_are_trimmed` (Task 6).
+2. **Clicar no ícone da bandeja com a janela aberta**: a janela perde o foco e se esconde antes do clique chegar, e o clique reabriria a janela. O esperado é que ela fique fechada. Teste: `click_right_after_a_blur_hide_is_ignored_so_it_does_not_reopen` (Task 7).
+3. **Lâmpada com status faltando, mal tipado ou `colour_data_v2` malformado**: não pode dar pânico; mostra valores padrão. Testes: `missing_codes_fall_back_to_defaults`, `malformed_colour_data_keeps_defaults_without_panicking`, `wrongly_typed_values_do_not_panic` (Task 4).
+4. **Um dispositivo entre vários falha ao ler status ou está offline**: os outros continuam aparecendo. Teste: `one_failing_status_does_not_break_the_whole_list` (Task 6).
+5. **Atualização automática chegando enquanto um comando está em andamento, ou comando que falha**: a atualização não pode desfazer a mudança otimista, e a falha deve reverter o card. Testes: `background updates are ignored while a command is in flight`, `sendLight reverts the card and shows the error when the API fails` (Task 8).
+
+---
+
+### Task 1: Esqueleto do projeto e higiene do repositório
+
+**Files:**
+- Create: `.gitignore` (raiz), `app/` (gerado por `create-tauri-app`)
+- Modify: `app/src-tauri/Cargo.toml`, `app/src-tauri/src/lib.rs`, `app/src-tauri/tauri.conf.json`, `app/src-tauri/capabilities/default.json`, `app/package.json`, `app/vite.config.js`
+
+**Interfaces:**
+- Produces: projeto Tauri que compila (`cargo check`) e roda testes (`npx vitest run`); crate Rust com lib `app_lib`; janela `main` (360x480, sem borda, oculta, sempre no topo, fora da barra de tarefas).
+
+- [ ] **Step 1: Verificar o repositório**
+
+Run (na raiz `C:\Users\joaov\positivo-desktop`): `git rev-parse --is-inside-work-tree`
+Expected: `true`. Se der erro "not a git repository", **pergunte à pessoa** antes de rodar `git init` (ela foi consultada sobre isso, mas não respondeu).
+
+- [ ] **Step 2: Criar o `.gitignore` da raiz**
+
+```gitignore
+spike/.env
+spike/devices.json
+spike/.venv/
+app/node_modules/
+app/build/
+app/.svelte-kit/
+app/src-tauri/target/
+app/src-tauri/gen/
+.env
+```
+
+- [ ] **Step 3: Gerar o esqueleto**
+
+Run (na raiz): `npm create tauri-app@latest app -- --template svelte-ts --manager npm --identifier com.positivo.tray -y`
+Expected: `Template created!` e a pasta `app/` com `src/routes/+page.svelte`, `src-tauri/` e `package.json`.
+
+- [ ] **Step 4: Dependências do frontend**
+
+Run (em `app/`):
+
+```bash
+npm install
+npm uninstall @tauri-apps/plugin-opener
+npm install -D vitest jsdom @testing-library/svelte @testing-library/dom
+```
+
+Em `app/package.json`, dentro de `"scripts"`, acrescente `"test": "vitest run"` (depois da linha `"tauri": "tauri"`, lembrando da vírgula).
+
+- [ ] **Step 5: Dependências do Rust**
+
+Em `app/src-tauri/Cargo.toml`, troque a seção `[dependencies]` inteira (remove `tauri-plugin-opener`) por:
+
+```toml
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+thiserror = "2"
+futures = "0.3"
+keyring = { version = "3", features = ["windows-native"] }
+
+[dev-dependencies]
+wiremock = "0.6"
+```
+
+Substitua `app/src-tauri/src/lib.rs` por um `run()` mínimo (os módulos entram nas próximas tarefas):
+
+```rust
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+```
+
+- [ ] **Step 6: Janela de bandeja e permissões**
+
+Em `app/src-tauri/tauri.conf.json`, troque o array `"windows"` por:
+
+```json
+    "windows": [
+      {
+        "label": "main",
+        "title": "Positivo Tray",
+        "width": 360,
+        "height": 480,
+        "visible": false,
+        "decorations": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": true
+      }
+    ],
+```
+
+Em `app/src-tauri/capabilities/default.json`, deixe `"permissions": ["core:default"]` (remova `"opener:default"`).
+
+- [ ] **Step 7: Configuração do vitest**
+
+Substitua `app/vite.config.js` por:
+
+```javascript
+import { defineConfig } from "vitest/config";
+import { sveltekit } from "@sveltejs/kit/vite";
+import { svelteTesting } from "@testing-library/svelte/vite";
+// @ts-expect-error type error without @types/node package
+import process from "node:process";
+const host = process.env.TAURI_DEV_HOST;
+
+// https://vite.dev/config/
+export default defineConfig(() => ({
+  plugins: [sveltekit(), svelteTesting()],
+
+  test: {
+    environment: "jsdom",
+    include: ["src/**/*.test.ts"],
+  },
+
+  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
+  //
+  // 1. prevent Vite from obscuring rust errors
+  clearScreen: false,
+  // 2. tauri expects a fixed port, fail if that port is not available
+  server: {
+    port: 1420,
+    strictPort: true,
+    host: host || "127.0.0.1",
+    hmr: host
+      ? {
+          protocol: "ws",
+          host,
+          port: 1421,
+        }
+      : undefined,
+    watch: {
+      // 3. tell Vite to ignore watching `src-tauri`
+      ignored: ["**/src-tauri/**"],
+    },
+  },
+}));
+```
+
+- [ ] **Step 8: Verificar**
+
+Run (em `app/src-tauri`): `cargo check`
+Expected: `Finished` sem erros (a primeira compilação baixa muitas crates e leva alguns minutos).
+
+Run (em `app`): `npx vitest run --passWithNoTests`
+Expected: sai com código 0 ("No test files found").
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add .gitignore app
+git commit -m "chore: scaffold Tauri + Svelte tray app"
+```
+
+---
+
+### Task 2: Assinatura das requisições Tuya e tipos base
+
+**Files:**
+- Create: `app/src-tauri/src/tuya/mod.rs`, `app/src-tauri/src/tuya/sign.rs`
+- Modify: `app/src-tauri/src/lib.rs`
+
+**Interfaces:**
+- Produces (`crate::tuya`): `Region { Us, Eu, Cn, In }` com `base_url()`; `Error { Network(String), Auth(String), Api{code:i64,msg:String}, Decode(String) }`; `TuyaDevice { id, name, category, online }`; `StatusItem { code, value: serde_json::Value }`; `Command { code, value }` (Serialize). `sign::{content_sha256, canonical_url, SignInput, sign}`.
+
+- [ ] **Step 1: Escrever os testes da assinatura**
+
+Crie `app/src-tauri/src/tuya/sign.rs` contendo **apenas** este módulo de testes (os vetores de referência foram calculados com uma implementação independente em Python):
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_request_signature_matches_reference_vector() {
+        let got = sign(&SignInput {
+            client_id: "abc123",
+            secret: "secret456",
+            access_token: None,
+            t_millis: 1_700_000_000_000,
+            nonce: "",
+            method: "GET",
+            url: "/v1.0/token?grant_type=1",
+            body: "",
+        });
+        assert_eq!(
+            got,
+            "2D2386EF2B9C1FFD7816DF37D1023482B44F9DD74F5D569C3AF7B5F9C0CF651B"
+        );
+    }
+
+    #[test]
+    fn business_request_signature_includes_token_and_body_hash() {
+        let body = r#"{"commands":[{"code":"switch_led","value":true}]}"#;
+        assert_eq!(
+            content_sha256(body),
+            "8479c9c60cd5d531054c49333c7b361a9ce41b9b313ab8eb6bc9df4141f658ef"
+        );
+        let got = sign(&SignInput {
+            client_id: "abc123",
+            secret: "secret456",
+            access_token: Some("tok789"),
+            t_millis: 1_700_000_000_000,
+            nonce: "",
+            method: "POST",
+            url: "/v1.0/devices/dev1/commands",
+            body,
+        });
+        assert_eq!(
+            got,
+            "E9FF3A419E1F377DDE060A154847288C9F696C1191B40AC5B27C4AF9CA2AA8C1"
+        );
+    }
+
+    #[test]
+    fn empty_body_hash_is_the_well_known_constant() {
+        assert_eq!(
+            content_sha256(""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn canonical_url_sorts_query_by_key() {
+        assert_eq!(
+            canonical_url("/v1.0/x", &[("b", "2"), ("a", "1")]),
+            "/v1.0/x?a=1&b=2"
+        );
+        assert_eq!(canonical_url("/v1.0/x", &[]), "/v1.0/x");
+    }
+}
+```
+
+- [ ] **Step 2: Registrar o módulo e ver falhar**
+
+Crie `app/src-tauri/src/tuya/mod.rs` com o conteúdo abaixo (a linha `pub mod client;` só entra na Task 3):
+
+```rust
+pub mod sign;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Region {
+    Us,
+    Eu,
+    Cn,
+    In,
+}
+
+impl Region {
+    pub fn base_url(self) -> &'static str {
+        match self {
+            Region::Us => "https://openapi.tuyaus.com",
+            Region::Eu => "https://openapi.tuyaeu.com",
+            Region::Cn => "https://openapi.tuyacn.com",
+            Region::In => "https://openapi.tuyain.com",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum Error {
+    #[error("sem conexão com a Tuya: {0}")]
+    Network(String),
+    #[error("credenciais Tuya inválidas: {0}")]
+    Auth(String),
+    #[error("erro da API Tuya ({code}): {msg}")]
+    Api { code: i64, msg: String },
+    #[error("resposta inesperada da Tuya: {0}")]
+    Decode(String),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TuyaDevice {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    #[serde(default)]
+    pub online: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StatusItem {
+    pub code: String,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Command {
+    pub code: String,
+    pub value: serde_json::Value,
+}
+```
+
+Acrescente `mod tuya;` no topo de `lib.rs`.
+
+Run (em `app/src-tauri`): `cargo test sign`
+Expected: FAIL de compilação (`cannot find function sign`, `content_sha256`, `canonical_url`).
+
+- [ ] **Step 3: Implementar a assinatura**
+
+Em `sign.rs`, **acima** do módulo de testes, escreva:
+
+```rust
+use hmac::{Hmac, Mac};
+use sha2::{Digest, Sha256};
+
+type HmacSha256 = Hmac<Sha256>;
+
+pub fn content_sha256(body: &str) -> String {
+    hex::encode(Sha256::digest(body.as_bytes()))
+}
+
+/// Path plus query parameters sorted by key, exactly as they are sent on the wire.
+pub fn canonical_url(path: &str, query: &[(&str, &str)]) -> String {
+    if query.is_empty() {
+        return path.to_string();
+    }
+    let mut sorted = query.to_vec();
+    sorted.sort();
+    let joined = sorted
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{path}?{joined}")
+}
+
+pub struct SignInput<'a> {
+    pub client_id: &'a str,
+    pub secret: &'a str,
+    pub access_token: Option<&'a str>,
+    pub t_millis: u64,
+    pub nonce: &'a str,
+    pub method: &'a str,
+    /// Output of `canonical_url`.
+    pub url: &'a str,
+    pub body: &'a str,
+}
+
+pub fn sign(i: &SignInput) -> String {
+    let string_to_sign = format!("{}\n{}\n\n{}", i.method, content_sha256(i.body), i.url);
+    let payload = format!(
+        "{}{}{}{}{}",
+        i.client_id,
+        i.access_token.unwrap_or(""),
+        i.t_millis,
+        i.nonce,
+        string_to_sign
+    );
+    let mut mac =
+        HmacSha256::new_from_slice(i.secret.as_bytes()).expect("HMAC accepts any key length");
+    mac.update(payload.as_bytes());
+    hex::encode_upper(mac.finalize().into_bytes())
+}
+```
+
+- [ ] **Step 4: Ver passar**
+
+Run: `cargo test sign`
+Expected: 4 testes passam.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/src-tauri
+git commit -m "feat(tuya): request signing and base types"
+```
+
+---
+
+### Task 3: Cliente da API Tuya (token, lista, status, comandos)
+
+**Files:**
+- Create: `app/src-tauri/src/tuya/client.rs`
+- Modify: `app/src-tauri/src/tuya/mod.rs` (acrescentar `pub mod client;`)
+
+**Interfaces:**
+- Consumes: `tuya::sign::{canonical_url, sign, SignInput}`, `Region`, `Error`, `TuyaDevice`, `StatusItem`, `Command`.
+- Produces: `TuyaClient::new(base_url: impl Into<String>, access_id: String, secret: String)`, `TuyaClient::for_region(Region, String, String)`, `async list_devices() -> Result<Vec<TuyaDevice>, Error>`, `async device_status(&str) -> Result<Vec<StatusItem>, Error>`, `async send_commands(&str, &[Command]) -> Result<(), Error>`. Token em cache, renovado 60 s antes de expirar e uma vez quando a Tuya responde `1010`; erros `1004`/`1005` viram `Error::Auth`.
+
+- [ ] **Step 1: Escrever os testes**
+
+Crie `client.rs` com **apenas** este módulo de testes (usa um servidor falso `wiremock`; o último teste `#[ignore]` fala com a nuvem real):
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{body_json, header_exists, method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn token_ok(expire_s: u64) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(json!({
+            "success": true, "t": 1,
+            "result": {"access_token": "tok-1", "expire_time": expire_s, "refresh_token": "r", "uid": "u"}
+        }))
+    }
+
+    fn api_ok(result: Value) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(json!({"success": true, "result": result}))
+    }
+
+    fn api_err(code: i64, msg: &str) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(json!({"success": false, "code": code, "msg": msg}))
+    }
+
+    fn client(server: &MockServer) -> TuyaClient {
+        TuyaClient::new(server.uri(), "id".into(), "secret".into())
+    }
+
+    #[tokio::test]
+    async fn lists_devices_and_sends_signature_headers() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1.0/token"))
+            .and(query_param("grant_type", "1"))
+            .and(header_exists("sign"))
+            .and(header_exists("client_id"))
+            .and(header_exists("t"))
+            .respond_with(token_ok(7200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1.0/iot-01/associated-users/devices"))
+            .and(header_exists("access_token"))
+            .and(header_exists("sign"))
+            .respond_with(api_ok(json!({
+                "devices": [{"id": "d1", "name": "Luz", "category": "dj", "online": true}],
+                "has_more": false
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let devices = client(&server).list_devices().await.unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].name, "Luz");
+        assert!(devices[0].online);
+    }
+
+    #[tokio::test]
+    async fn follows_pagination_until_has_more_is_false() {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1.0/token"))
+            .respond_with(token_ok(7200))
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/iot-01/associated-users/devices"))
+            .and(query_param("last_row_key", "k1"))
+            .respond_with(api_ok(json!({
+                "devices": [{"id": "d2", "name": "B", "category": "cz"}],
+                "has_more": false
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/iot-01/associated-users/devices"))
+            .respond_with(api_ok(json!({
+                "devices": [{"id": "d1", "name": "A", "category": "dj"}],
+                "has_more": true, "last_row_key": "k1"
+            })))
+            .mount(&server)
+            .await;
+
+        let devices = client(&server).list_devices().await.unwrap();
+        let ids: Vec<_> = devices.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ids, ["d1", "d2"]);
+    }
+
+    #[tokio::test]
+    async fn token_is_cached_between_calls() {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1.0/token"))
+            .respond_with(token_ok(7200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/devices/d1/status"))
+            .respond_with(api_ok(json!([{"code": "switch_led", "value": true}])))
+            .mount(&server)
+            .await;
+        let c = client(&server);
+        c.device_status("d1").await.unwrap();
+        let status = c.device_status("d1").await.unwrap();
+        assert_eq!(status[0].code, "switch_led");
+    }
+
+    #[tokio::test]
+    async fn token_inside_the_safety_margin_is_refreshed() {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1.0/token"))
+            .respond_with(token_ok(30))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/devices/d1/status"))
+            .respond_with(api_ok(json!([])))
+            .mount(&server)
+            .await;
+        let c = client(&server);
+        c.device_status("d1").await.unwrap();
+        c.device_status("d1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn expired_token_is_refreshed_and_the_call_retried_once() {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1.0/token"))
+            .respond_with(token_ok(7200))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/devices/d1/status"))
+            .respond_with(api_err(1010, "token invalid"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/devices/d1/status"))
+            .respond_with(api_ok(json!([])))
+            .mount(&server)
+            .await;
+        assert!(client(&server).device_status("d1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn persistent_token_error_is_returned_not_looped() {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1.0/token"))
+            .respond_with(token_ok(7200))
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/devices/d1/status"))
+            .respond_with(api_err(1010, "token invalid"))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let err = client(&server).device_status("d1").await.unwrap_err();
+        assert!(matches!(err, Error::Api { code: 1010, .. }));
+    }
+
+    #[tokio::test]
+    async fn bad_signature_on_token_request_is_an_auth_error() {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1.0/token"))
+            .respond_with(api_err(1004, "sign invalid"))
+            .mount(&server)
+            .await;
+        let err = client(&server).list_devices().await.unwrap_err();
+        assert!(matches!(err, Error::Auth(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn send_commands_posts_the_commands_body() {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1.0/token"))
+            .respond_with(token_ok(7200))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1.0/devices/d1/commands"))
+            .and(body_json(
+                json!({"commands": [{"code": "switch_led", "value": false}]}),
+            ))
+            .respond_with(api_ok(json!(true)))
+            .expect(1)
+            .mount(&server)
+            .await;
+        client(&server)
+            .send_commands(
+                "d1",
+                &[Command {
+                    code: "switch_led".into(),
+                    value: json!(false),
+                }],
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Hits the real Tuya cloud to prove the signing scheme end to end.
+    /// Needs TUYA_ACCESS_ID, TUYA_ACCESS_KEY and TUYA_REGION (us|eu|cn|in) in the environment.
+    /// Run with: cargo test live_smoke -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_smoke_lists_devices_and_reads_a_lamp_status() {
+        let region: Region = serde_json::from_value(json!(std::env::var("TUYA_REGION").unwrap()))
+            .expect("TUYA_REGION must be us, eu, cn or in");
+        let c = TuyaClient::for_region(
+            region,
+            std::env::var("TUYA_ACCESS_ID").unwrap(),
+            std::env::var("TUYA_ACCESS_KEY").unwrap(),
+        );
+        let devices = c.list_devices().await.unwrap();
+        println!("{} device(s)", devices.len());
+        for d in &devices {
+            println!("  {} [{}] online={}", d.name, d.category, d.online);
+        }
+        let lamp = devices
+            .iter()
+            .find(|d| d.category == "dj" && d.online)
+            .expect("no online lamp found");
+        let status = c.device_status(&lamp.id).await.unwrap();
+        assert!(status.iter().any(|s| s.code == "switch_led"));
+    }
+
+    #[tokio::test]
+    async fn unreachable_server_is_a_network_error() {
+        let c = TuyaClient::new("http://127.0.0.1:1", "id".into(), "secret".into());
+        assert!(matches!(
+            c.list_devices().await.unwrap_err(),
+            Error::Network(_)
+        ));
+    }
+}
+```
+
+- [ ] **Step 2: Registrar e ver falhar**
+
+Acrescente `pub mod client;` em `tuya/mod.rs`.
+Run: `cargo test client`
+Expected: FAIL de compilação (`TuyaClient` não existe).
+
+- [ ] **Step 3: Implementar o cliente**
+
+Em `client.rs`, **acima** do módulo de testes:
+
+```rust
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use reqwest::Method;
+use serde::Deserialize;
+use serde_json::Value;
+use tokio::sync::Mutex;
+
+use super::sign::{canonical_url, sign, SignInput};
+use super::{Command, Error, Region, StatusItem, TuyaDevice};
+
+/// Tuya error code for "token invalid" (expired or revoked).
+const CODE_TOKEN_INVALID: i64 = 1010;
+/// Tuya error codes for a bad signature or an unknown client id.
+const CODES_BAD_CREDENTIALS: [i64; 2] = [1004, 1005];
+/// Refresh the token this long before it really expires.
+const TOKEN_MARGIN_MS: u64 = 60_000;
+const MAX_DEVICE_PAGES: usize = 20;
+
+#[derive(Debug, Deserialize)]
+struct Envelope {
+    success: bool,
+    #[serde(default)]
+    result: Value,
+    code: Option<i64>,
+    msg: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CachedToken {
+    value: String,
+    valid_until_ms: u64,
+}
+
+pub struct TuyaClient {
+    http: reqwest::Client,
+    base_url: String,
+    access_id: String,
+    secret: String,
+    token: Mutex<Option<CachedToken>>,
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is after 1970")
+        .as_millis() as u64
+}
+
+impl TuyaClient {
+    pub fn new(base_url: impl Into<String>, access_id: String, secret: String) -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            base_url: base_url.into(),
+            access_id,
+            secret,
+            token: Mutex::new(None),
+        }
+    }
+
+    pub fn for_region(region: Region, access_id: String, secret: String) -> Self {
+        Self::new(region.base_url(), access_id, secret)
+    }
+
+    pub async fn list_devices(&self) -> Result<Vec<TuyaDevice>, Error> {
+        let mut devices = Vec::new();
+        let mut last_row_key = String::new();
+        for _ in 0..MAX_DEVICE_PAGES {
+            let query: Vec<(&str, &str)> = if last_row_key.is_empty() {
+                vec![]
+            } else {
+                vec![("last_row_key", last_row_key.as_str())]
+            };
+            let result = self
+                .request(
+                    Method::GET,
+                    "/v1.0/iot-01/associated-users/devices",
+                    &query,
+                    None,
+                )
+                .await?;
+            let page: Vec<TuyaDevice> = serde_json::from_value(
+                result.get("devices").cloned().unwrap_or(Value::Array(vec![])),
+            )
+            .map_err(|e| Error::Decode(e.to_string()))?;
+            devices.extend(page);
+            let has_more = result
+                .get("has_more")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            match result.get("last_row_key").and_then(Value::as_str) {
+                Some(key) if has_more && !key.is_empty() => last_row_key = key.to_string(),
+                _ => break,
+            }
+        }
+        Ok(devices)
+    }
+
+    pub async fn device_status(&self, id: &str) -> Result<Vec<StatusItem>, Error> {
+        let path = format!("/v1.0/devices/{id}/status");
+        let result = self.request(Method::GET, &path, &[], None).await?;
+        serde_json::from_value(result).map_err(|e| Error::Decode(e.to_string()))
+    }
+
+    pub async fn send_commands(&self, id: &str, commands: &[Command]) -> Result<(), Error> {
+        let path = format!("/v1.0/devices/{id}/commands");
+        let body = serde_json::json!({ "commands": commands }).to_string();
+        self.request(Method::POST, &path, &[], Some(body)).await?;
+        Ok(())
+    }
+
+    async fn access_token(&self) -> Result<String, Error> {
+        let mut guard = self.token.lock().await;
+        if let Some(t) = guard.as_ref() {
+            if now_ms() < t.valid_until_ms {
+                return Ok(t.value.clone());
+            }
+        }
+        let result = self
+            .signed_call(
+                Method::GET,
+                "/v1.0/token",
+                &[("grant_type", "1")],
+                None,
+                None,
+            )
+            .await
+            .map_err(|e| match e {
+                Error::Api { code, msg } => Error::Auth(format!("{msg} ({code})")),
+                other => other,
+            })?;
+        let value = result
+            .get("access_token")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::Decode("token response without access_token".into()))?
+            .to_string();
+        let expire_s = result
+            .get("expire_time")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let valid_until_ms = (now_ms() + expire_s * 1000).saturating_sub(TOKEN_MARGIN_MS);
+        *guard = Some(CachedToken {
+            value: value.clone(),
+            valid_until_ms,
+        });
+        Ok(value)
+    }
+
+    async fn invalidate_token(&self) {
+        *self.token.lock().await = None;
+    }
+
+    /// Authenticated call. Refreshes the token and retries once when Tuya says it is invalid.
+    async fn request(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<String>,
+    ) -> Result<Value, Error> {
+        let mut retried = false;
+        loop {
+            let token = self.access_token().await?;
+            let outcome = self
+                .signed_call(method.clone(), path, query, body.clone(), Some(&token))
+                .await;
+            match outcome {
+                Err(Error::Api { code, .. }) if code == CODE_TOKEN_INVALID && !retried => {
+                    retried = true;
+                    self.invalidate_token().await;
+                }
+                Err(Error::Api { code, msg }) if CODES_BAD_CREDENTIALS.contains(&code) => {
+                    return Err(Error::Auth(format!("{msg} ({code})")));
+                }
+                other => return other,
+            }
+        }
+    }
+
+    async fn signed_call(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<String>,
+        token: Option<&str>,
+    ) -> Result<Value, Error> {
+        let url = canonical_url(path, query);
+        let t = now_ms();
+        let body_str = body.clone().unwrap_or_default();
+        let signature = sign(&SignInput {
+            client_id: &self.access_id,
+            secret: &self.secret,
+            access_token: token,
+            t_millis: t,
+            nonce: "",
+            method: method.as_str(),
+            url: &url,
+            body: &body_str,
+        });
+        let mut req = self
+            .http
+            .request(method, format!("{}{}", self.base_url, url))
+            .header("client_id", &self.access_id)
+            .header("sign", signature)
+            .header("t", t.to_string())
+            .header("sign_method", "HMAC-SHA256");
+        if let Some(token) = token {
+            req = req.header("access_token", token);
+        }
+        if let Some(body) = body {
+            req = req.header("Content-Type", "application/json").body(body);
+        }
+        let response = req
+            .send()
+            .await
+            .map_err(|e| Error::Network(e.to_string()))?;
+        let envelope: Envelope = response
+            .json()
+            .await
+            .map_err(|e| Error::Decode(e.to_string()))?;
+        if envelope.success {
+            Ok(envelope.result)
+        } else {
+            Err(Error::Api {
+                code: envelope.code.unwrap_or(-1),
+                msg: envelope.msg.unwrap_or_default(),
+            })
+        }
+    }
+}
+```
+
+- [ ] **Step 4: Ver passar**
+
+Run: `cargo test client`
+Expected: 9 testes passam, 1 ignorado (`live_smoke_...`).
+
+- [ ] **Step 5: Teste ao vivo contra a API real (prova a assinatura de ponta a ponta)**
+
+Pergunte à pessoa se pode usar `spike/.env`. Se sim, em bash, em `app/src-tauri`:
+
+```bash
+set -a; . ../../spike/.env; set +a
+cargo test live_smoke -- --ignored --nocapture
+```
+
+Expected: imprime `1 device(s)` e `Luz do PC [dj] online=true`, e o teste passa. Se falhar com erro `1004`, a assinatura está errada: revise `sign.rs` antes de continuar.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app/src-tauri
+git commit -m "feat(tuya): cloud client with token cache and retry"
+```
+
+---
+
+### Task 4: Driver da lâmpada e modelo `DeviceView`
+
+**Files:**
+- Create: `app/src-tauri/src/devices/mod.rs`, `app/src-tauri/src/devices/light.rs`
+- Modify: `app/src-tauri/src/lib.rs` (acrescentar `mod devices;`)
+
+**Interfaces:**
+- Consumes: `tuya::{StatusItem, TuyaDevice, Command}`.
+- Produces: `devices::light::{CATEGORY_LIGHT = "dj", LightMode, LightState{on,mode,brightness,temperature,hue,saturation,value}, LightAction (serde tag "type": set_power{on}, set_brightness{value}, set_temperature{value}, set_colour{h,s,v}), parse_light(&[StatusItem]) -> LightState, commands_for(&LightState, &LightAction) -> Vec<Command>}` e `devices::{DeviceView{id,name,category,online,light:Option<LightState>}, build_view(&TuyaDevice, Option<&[StatusItem]>) -> DeviceView}`.
+
+- [ ] **Step 1: Escrever os testes do driver**
+
+Crie `devices/light.rs` com **apenas** este módulo de testes (inclui o status real capturado no spike e os casos do Review Focus 3):
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(code: &str, value: Value) -> StatusItem {
+        StatusItem {
+            code: code.into(),
+            value,
+        }
+    }
+
+    fn spike_status() -> Vec<StatusItem> {
+        vec![
+            item("switch_led", json!(true)),
+            item("work_mode", json!("white")),
+            item("bright_value_v2", json!(1000)),
+            item("temp_value_v2", json!(250)),
+            item("colour_data_v2", json!("{\"h\":120,\"s\":900,\"v\":800}")),
+            item("countdown_1", json!(0)),
+        ]
+    }
+
+    #[test]
+    fn parses_the_real_status_captured_in_the_spike() {
+        let s = parse_light(&spike_status());
+        assert_eq!(
+            s,
+            LightState {
+                on: true,
+                mode: LightMode::White,
+                brightness: 1000,
+                temperature: 250,
+                hue: 120,
+                saturation: 900,
+                value: 800,
+            }
+        );
+    }
+
+    #[test]
+    fn missing_codes_fall_back_to_defaults() {
+        assert_eq!(parse_light(&[]), LightState::default());
+    }
+
+    #[test]
+    fn malformed_colour_data_keeps_defaults_without_panicking() {
+        let s = parse_light(&[item("colour_data_v2", json!("not json"))]);
+        assert_eq!((s.hue, s.saturation, s.value), (0, 1000, 1000));
+        let s = parse_light(&[item("colour_data_v2", json!(42))]);
+        assert_eq!(s.hue, 0);
+    }
+
+    #[test]
+    fn out_of_range_values_are_clamped() {
+        let s = parse_light(&[
+            item("bright_value_v2", json!(5000)),
+            item("temp_value_v2", json!(-3)),
+        ]);
+        assert_eq!((s.brightness, s.temperature), (1000, 0));
+    }
+
+    #[test]
+    fn wrongly_typed_values_do_not_panic() {
+        let s = parse_light(&[
+            item("switch_led", json!("yes")),
+            item("bright_value_v2", json!("high")),
+        ]);
+        assert!(!s.on);
+        assert_eq!(s.brightness, 1000);
+    }
+
+    #[test]
+    fn set_power_sends_switch_led() {
+        let cmds = commands_for(&LightState::default(), &LightAction::SetPower { on: true });
+        assert_eq!(cmds, vec![cmd("switch_led", json!(true))]);
+    }
+
+    #[test]
+    fn brightness_in_white_mode_uses_bright_value() {
+        let cmds = commands_for(
+            &LightState::default(),
+            &LightAction::SetBrightness { value: 500 },
+        );
+        assert_eq!(cmds, vec![cmd("bright_value_v2", json!(500))]);
+    }
+
+    #[test]
+    fn brightness_in_colour_mode_changes_the_v_of_the_current_colour() {
+        let state = LightState {
+            mode: LightMode::Colour,
+            hue: 120,
+            saturation: 900,
+            ..LightState::default()
+        };
+        let cmds = commands_for(&state, &LightAction::SetBrightness { value: 400 });
+        assert_eq!(
+            cmds,
+            vec![cmd(
+                "colour_data_v2",
+                json!("{\"h\":120,\"s\":900,\"v\":400}")
+            )]
+        );
+    }
+
+    #[test]
+    fn brightness_below_the_minimum_is_raised_to_10() {
+        let cmds = commands_for(
+            &LightState::default(),
+            &LightAction::SetBrightness { value: 0 },
+        );
+        assert_eq!(cmds, vec![cmd("bright_value_v2", json!(10))]);
+    }
+
+    #[test]
+    fn temperature_switches_to_white_mode_first() {
+        let cmds = commands_for(
+            &LightState::default(),
+            &LightAction::SetTemperature { value: 300 },
+        );
+        assert_eq!(
+            cmds,
+            vec![
+                cmd("work_mode", json!("white")),
+                cmd("temp_value_v2", json!(300))
+            ]
+        );
+    }
+
+    #[test]
+    fn colour_switches_to_colour_mode_and_clamps() {
+        let cmds = commands_for(
+            &LightState::default(),
+            &LightAction::SetColour {
+                h: 400,
+                s: 2000,
+                v: 1,
+            },
+        );
+        assert_eq!(
+            cmds,
+            vec![
+                cmd("work_mode", json!("colour")),
+                cmd("colour_data_v2", json!("{\"h\":360,\"s\":1000,\"v\":10}")),
+            ]
+        );
+    }
+
+    #[test]
+    fn actions_deserialize_from_the_ui_json_shape() {
+        let a: LightAction = serde_json::from_str(r#"{"type":"set_power","on":true}"#).unwrap();
+        assert_eq!(a, LightAction::SetPower { on: true });
+        let a: LightAction =
+            serde_json::from_str(r#"{"type":"set_colour","h":10,"s":20,"v":30}"#).unwrap();
+        assert_eq!(a, LightAction::SetColour { h: 10, s: 20, v: 30 });
+    }
+}
+```
+
+Crie `devices/mod.rs` com **apenas** este módulo de testes:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn device(category: &str, online: bool) -> TuyaDevice {
+        TuyaDevice {
+            id: "d1".into(),
+            name: "Luz".into(),
+            category: category.into(),
+            online,
+        }
+    }
+
+    fn status() -> Vec<StatusItem> {
+        vec![StatusItem {
+            code: "switch_led".into(),
+            value: json!(true),
+        }]
+    }
+
+    #[test]
+    fn online_lamp_with_status_gets_light_state() {
+        let view = build_view(&device("dj", true), Some(&status()));
+        assert!(view.light.unwrap().on);
+    }
+
+    #[test]
+    fn offline_lamp_has_no_light_state() {
+        assert!(build_view(&device("dj", false), Some(&status())).light.is_none());
+    }
+
+    #[test]
+    fn lamp_whose_status_failed_has_no_light_state() {
+        assert!(build_view(&device("dj", true), None).light.is_none());
+    }
+
+    #[test]
+    fn unsupported_category_has_no_light_state_but_keeps_identity() {
+        let view = build_view(&device("sp", true), Some(&status()));
+        assert!(view.light.is_none());
+        assert_eq!((view.id.as_str(), view.name.as_str()), ("d1", "Luz"));
+    }
+}
+```
+
+- [ ] **Step 2: Registrar e ver falhar**
+
+Acrescente `mod devices;` em `lib.rs`.
+Run: `cargo test devices`
+Expected: FAIL de compilação (`parse_light`, `commands_for`, `build_view` não existem).
+
+- [ ] **Step 3: Implementar o driver**
+
+Em `devices/light.rs`, **acima** dos testes:
+
+```rust
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+use crate::tuya::{Command, StatusItem};
+
+pub const CATEGORY_LIGHT: &str = "dj";
+
+const BRIGHTNESS: (u16, u16) = (10, 1000);
+const TEMPERATURE: (u16, u16) = (0, 1000);
+const HUE_MAX: u16 = 360;
+const SATURATION_MAX: u16 = 1000;
+const VALUE: (u16, u16) = (10, 1000);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LightMode {
+    White,
+    Colour,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LightState {
+    pub on: bool,
+    pub mode: LightMode,
+    pub brightness: u16,
+    pub temperature: u16,
+    pub hue: u16,
+    pub saturation: u16,
+    pub value: u16,
+}
+
+impl Default for LightState {
+    fn default() -> Self {
+        Self {
+            on: false,
+            mode: LightMode::White,
+            brightness: BRIGHTNESS.1,
+            temperature: TEMPERATURE.1,
+            hue: 0,
+            saturation: SATURATION_MAX,
+            value: VALUE.1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LightAction {
+    SetPower { on: bool },
+    SetBrightness { value: u16 },
+    SetTemperature { value: u16 },
+    SetColour { h: u16, s: u16, v: u16 },
+}
+
+fn int_in(value: &Value, min: u16, max: u16) -> Option<u16> {
+    value
+        .as_i64()
+        .map(|n| n.clamp(min as i64, max as i64) as u16)
+}
+
+pub fn parse_light(status: &[StatusItem]) -> LightState {
+    let mut state = LightState::default();
+    for item in status {
+        match item.code.as_str() {
+            "switch_led" => state.on = item.value.as_bool().unwrap_or(false),
+            "work_mode" => {
+                state.mode = if item.value.as_str() == Some("colour") {
+                    LightMode::Colour
+                } else {
+                    LightMode::White
+                }
+            }
+            "bright_value_v2" => {
+                state.brightness = int_in(&item.value, BRIGHTNESS.0, BRIGHTNESS.1)
+                    .unwrap_or(state.brightness)
+            }
+            "temp_value_v2" => {
+                state.temperature = int_in(&item.value, TEMPERATURE.0, TEMPERATURE.1)
+                    .unwrap_or(state.temperature)
+            }
+            "colour_data_v2" => {
+                // Tuya sends this as a JSON string; a malformed one keeps the defaults.
+                if let Some(Ok(parsed)) = item
+                    .value
+                    .as_str()
+                    .map(serde_json::from_str::<Value>)
+                {
+                    state.hue = int_in(&parsed["h"], 0, HUE_MAX).unwrap_or(state.hue);
+                    state.saturation =
+                        int_in(&parsed["s"], 0, SATURATION_MAX).unwrap_or(state.saturation);
+                    state.value = int_in(&parsed["v"], VALUE.0, VALUE.1).unwrap_or(state.value);
+                }
+            }
+            _ => {}
+        }
+    }
+    state
+}
+
+fn cmd(code: &str, value: Value) -> Command {
+    Command {
+        code: code.into(),
+        value,
+    }
+}
+
+fn colour_command(h: u16, s: u16, v: u16) -> Command {
+    cmd(
+        "colour_data_v2",
+        json!(json!({"h": h, "s": s, "v": v}).to_string()),
+    )
+}
+
+pub fn commands_for(state: &LightState, action: &LightAction) -> Vec<Command> {
+    match *action {
+        LightAction::SetPower { on } => vec![cmd("switch_led", json!(on))],
+        LightAction::SetBrightness { value } => match state.mode {
+            LightMode::White => vec![cmd(
+                "bright_value_v2",
+                json!(value.clamp(BRIGHTNESS.0, BRIGHTNESS.1)),
+            )],
+            LightMode::Colour => vec![colour_command(
+                state.hue,
+                state.saturation,
+                value.clamp(VALUE.0, VALUE.1),
+            )],
+        },
+        LightAction::SetTemperature { value } => vec![
+            cmd("work_mode", json!("white")),
+            cmd(
+                "temp_value_v2",
+                json!(value.clamp(TEMPERATURE.0, TEMPERATURE.1)),
+            ),
+        ],
+        LightAction::SetColour { h, s, v } => vec![
+            cmd("work_mode", json!("colour")),
+            colour_command(
+                h.min(HUE_MAX),
+                s.min(SATURATION_MAX),
+                v.clamp(VALUE.0, VALUE.1),
+            ),
+        ],
+    }
+}
+```
+
+Em `devices/mod.rs`, **acima** dos testes:
+
+```rust
+pub mod light;
+
+use serde::Serialize;
+
+use crate::tuya::{StatusItem, TuyaDevice};
+use light::{parse_light, LightState, CATEGORY_LIGHT};
+
+/// What the UI sees for one device. `light` is present only for an online lamp whose status was read.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DeviceView {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub online: bool,
+    pub light: Option<LightState>,
+}
+
+pub fn build_view(device: &TuyaDevice, status: Option<&[StatusItem]>) -> DeviceView {
+    let light = match (device.category.as_str(), device.online, status) {
+        (CATEGORY_LIGHT, true, Some(items)) => Some(parse_light(items)),
+        _ => None,
+    };
+    DeviceView {
+        id: device.id.clone(),
+        name: device.name.clone(),
+        category: device.category.clone(),
+        online: device.online,
+        light,
+    }
+}
+```
+
+- [ ] **Step 4: Ver passar**
+
+Run: `cargo test devices`
+Expected: 16 testes passam.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/src-tauri
+git commit -m "feat(devices): lamp driver and device view model"
+```
+
+---
+
+### Task 5: Armazenamento de credenciais
+
+**Files:**
+- Create: `app/src-tauri/src/secrets.rs`
+- Modify: `app/src-tauri/src/lib.rs` (acrescentar `mod secrets;`)
+
+**Interfaces:**
+- Consumes: `tuya::Region`.
+- Produces: `secrets::Credentials{access_id, access_secret, region: Region}` (Serialize/Deserialize), `StoreError(pub String)`, trait `SecretStore: Send + Sync { load() -> Result<Option<Credentials>, StoreError>; save(&Credentials) -> Result<(), StoreError> }`, `KeyringStore::new(service: impl Into<String>)`, e (só em testes) `MemoryStore::{empty(), with(Credentials)}`.
+
+- [ ] **Step 1: Escrever os testes**
+
+Crie `secrets.rs` com **apenas** este módulo de testes (um deles, `#[ignore]`, usa o Gerenciador de Credenciais real com um nome de serviço descartável):
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> Credentials {
+        Credentials {
+            access_id: "id".into(),
+            access_secret: "secret".into(),
+            region: Region::Us,
+        }
+    }
+
+    #[test]
+    fn credentials_round_trip_through_json_with_lowercase_region() {
+        let json = serde_json::to_string(&sample()).unwrap();
+        assert!(json.contains(r#""region":"us""#), "{json}");
+        assert_eq!(serde_json::from_str::<Credentials>(&json).unwrap(), sample());
+    }
+
+    #[test]
+    fn memory_store_saves_and_loads() {
+        let store = MemoryStore::empty();
+        assert_eq!(store.load().unwrap(), None);
+        store.save(&sample()).unwrap();
+        assert_eq!(store.load().unwrap(), Some(sample()));
+    }
+
+    /// Touches the real Windows Credential Manager (with a throwaway service name).
+    /// Run with: cargo test keyring -- --ignored
+    #[test]
+    #[ignore]
+    fn keyring_store_round_trips_in_the_real_credential_manager() {
+        let store = KeyringStore::new("positivo-tray-test");
+        store.clear().unwrap();
+        assert_eq!(store.load().unwrap(), None);
+        store.save(&sample()).unwrap();
+        assert_eq!(store.load().unwrap(), Some(sample()));
+        store.clear().unwrap();
+        assert_eq!(store.load().unwrap(), None);
+    }
+}
+```
+
+- [ ] **Step 2: Registrar e ver falhar**
+
+Acrescente `mod secrets;` em `lib.rs`.
+Run: `cargo test secrets`
+Expected: FAIL de compilação (`Credentials`, `KeyringStore` não existem).
+
+- [ ] **Step 3: Implementar**
+
+Em `secrets.rs`, **acima** do módulo de testes (inclui `MemoryStore` e `KeyringStore::clear`, ambos só para testes):
+
+```rust
+use serde::{Deserialize, Serialize};
+
+use crate::tuya::Region;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Credentials {
+    pub access_id: String,
+    pub access_secret: String,
+    pub region: Region,
+}
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("armazenamento de credenciais: {0}")]
+pub struct StoreError(pub String);
+
+pub trait SecretStore: Send + Sync {
+    fn load(&self) -> Result<Option<Credentials>, StoreError>;
+    fn save(&self, credentials: &Credentials) -> Result<(), StoreError>;
+}
+
+const KEYRING_USER: &str = "tuya-credentials";
+
+/// Windows Credential Manager, one JSON entry for all three values.
+pub struct KeyringStore {
+    service: String,
+}
+
+impl KeyringStore {
+    pub fn new(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+        }
+    }
+
+    fn entry(&self) -> Result<keyring::Entry, StoreError> {
+        keyring::Entry::new(&self.service, KEYRING_USER).map_err(|e| StoreError(e.to_string()))
+    }
+}
+
+impl SecretStore for KeyringStore {
+    fn load(&self) -> Result<Option<Credentials>, StoreError> {
+        match self.entry()?.get_password() {
+            Ok(json) => serde_json::from_str(&json)
+                .map(Some)
+                .map_err(|e| StoreError(format!("credenciais salvas estão corrompidas: {e}"))),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(StoreError(e.to_string())),
+        }
+    }
+
+    fn save(&self, credentials: &Credentials) -> Result<(), StoreError> {
+        let json = serde_json::to_string(credentials).map_err(|e| StoreError(e.to_string()))?;
+        self.entry()?
+            .set_password(&json)
+            .map_err(|e| StoreError(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+impl KeyringStore {
+    fn clear(&self) -> Result<(), StoreError> {
+        match self.entry()?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(StoreError(e.to_string())),
+        }
+    }
+}
+
+#[cfg(test)]
+pub struct MemoryStore(pub std::sync::Mutex<Option<Credentials>>);
+
+#[cfg(test)]
+impl MemoryStore {
+    pub fn empty() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+
+    pub fn with(credentials: Credentials) -> Self {
+        Self(std::sync::Mutex::new(Some(credentials)))
+    }
+}
+
+#[cfg(test)]
+impl SecretStore for MemoryStore {
+    fn load(&self) -> Result<Option<Credentials>, StoreError> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+
+    fn save(&self, credentials: &Credentials) -> Result<(), StoreError> {
+        *self.0.lock().unwrap() = Some(credentials.clone());
+        Ok(())
+    }
+}
+```
+
+- [ ] **Step 4: Ver passar**
+
+Run: `cargo test secrets`
+Expected: 2 testes passam, 1 ignorado.
+
+Run: `cargo test keyring -- --ignored`
+Expected: o teste do Gerenciador de Credenciais passa (grava e apaga uma entrada `positivo-tray-test`).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/src-tauri
+git commit -m "feat(secrets): Windows Credential Manager store"
+```
+
+---
+
+### Task 6: Serviço de dispositivos e comandos Tauri
+
+**Files:**
+- Create: `app/src-tauri/src/service.rs`, `app/src-tauri/src/commands.rs`
+- Modify: `app/src-tauri/src/lib.rs` (acrescentar `mod service;` e `mod commands;`)
+
+**Interfaces:**
+- Consumes: `TuyaClient`, `Credentials`, `SecretStore`, `devices::{build_view, DeviceView}`, `devices::light::{parse_light, commands_for, LightAction, CATEGORY_LIGHT}`.
+- Produces: `service::CommandError{kind,message}` (Serialize; `kind` ∈ `network|auth|api|decode|storage|no_credentials|invalid_input`), `DeviceService::new(Arc<dyn SecretStore>)`, `has_credentials()`, `async save_credentials(Credentials)`, `async list_devices() -> Result<Vec<DeviceView>, CommandError>`, `async send_light_command(&str, LightAction)`. Comandos Tauri: `has_credentials`, `save_credentials(accessId, accessSecret, region)`, `list_devices`, `send_light_command(id, action)`.
+
+> Nota de nome: o spec cita `send_command(id, ação)`. O plano usa `send_light_command` para manter o tipo da ação estrito; cada novo driver (ex.: câmera) ganha o seu próprio comando.
+
+- [ ] **Step 1: Escrever os testes do serviço**
+
+Crie `service.rs` com **apenas** este módulo de testes (cobre os Review Focus 1 e 4):
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::secrets::MemoryStore;
+    use crate::tuya::Region;
+    use serde_json::{json, Value};
+    use wiremock::matchers::{body_json, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn creds() -> Credentials {
+        Credentials {
+            access_id: "id".into(),
+            access_secret: "secret".into(),
+            region: Region::Us,
+        }
+    }
+
+    fn ok(result: Value) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(json!({"success": true, "result": result}))
+    }
+
+    async fn server_with_token() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1.0/token"))
+            .respond_with(ok(json!({"access_token": "t", "expire_time": 7200})))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn service(server: &MockServer) -> DeviceService {
+        DeviceService::with_base_url(Arc::new(MemoryStore::with(creds())), server.uri())
+    }
+
+    #[tokio::test]
+    async fn without_credentials_every_call_reports_no_credentials() {
+        let svc = DeviceService::new(Arc::new(MemoryStore::empty()));
+        assert!(!svc.has_credentials().unwrap());
+        let err = svc.list_devices().await.unwrap_err();
+        assert_eq!(err.kind, "no_credentials");
+    }
+
+    #[tokio::test]
+    async fn blank_credentials_are_rejected_and_not_saved() {
+        let store = Arc::new(MemoryStore::empty());
+        let svc = DeviceService::new(store.clone());
+        let mut blank = creds();
+        blank.access_secret = "   ".into();
+        let err = svc.save_credentials(blank).await.unwrap_err();
+        assert_eq!(err.kind, "invalid_input");
+        assert!(!svc.has_credentials().unwrap());
+    }
+
+    #[tokio::test]
+    async fn saved_credentials_are_trimmed() {
+        let store = Arc::new(MemoryStore::empty());
+        let svc = DeviceService::new(store.clone());
+        let mut padded = creds();
+        padded.access_id = "  id\n".into();
+        svc.save_credentials(padded).await.unwrap();
+        assert_eq!(store.load().unwrap().unwrap().access_id, "id");
+    }
+
+    #[tokio::test]
+    async fn list_devices_reads_status_only_for_online_lamps() {
+        let server = server_with_token().await;
+        Mock::given(path("/v1.0/iot-01/associated-users/devices"))
+            .respond_with(ok(json!({"devices": [
+                {"id": "lamp", "name": "Luz", "category": "dj", "online": true},
+                {"id": "off", "name": "Quarto", "category": "dj", "online": false},
+                {"id": "plug", "name": "Tomada", "category": "cz", "online": true}
+            ], "has_more": false})))
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/devices/lamp/status"))
+            .respond_with(ok(json!([{"code": "switch_led", "value": true}])))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/devices/off/status"))
+            .respond_with(ok(json!([])))
+            .expect(0)
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/devices/plug/status"))
+            .respond_with(ok(json!([])))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let views = service(&server).list_devices().await.unwrap();
+        assert_eq!(views.len(), 3);
+        assert!(views[0].light.as_ref().unwrap().on);
+        assert!(views[1].light.is_none() && !views[1].online);
+        assert!(views[2].light.is_none() && views[2].online);
+    }
+
+    #[tokio::test]
+    async fn one_failing_status_does_not_break_the_whole_list() {
+        let server = server_with_token().await;
+        Mock::given(path("/v1.0/iot-01/associated-users/devices"))
+            .respond_with(ok(json!({"devices": [
+                {"id": "a", "name": "A", "category": "dj", "online": true},
+                {"id": "b", "name": "B", "category": "dj", "online": true}
+            ], "has_more": false})))
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/devices/a/status"))
+            .respond_with(ok(json!([{"code": "switch_led", "value": true}])))
+            .mount(&server)
+            .await;
+        Mock::given(path("/v1.0/devices/b/status"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"success": false, "code": 2001, "msg": "device is offline"}),
+            ))
+            .mount(&server)
+            .await;
+
+        let views = service(&server).list_devices().await.unwrap();
+        assert!(views[0].light.is_some());
+        assert!(views[1].light.is_none());
+    }
+
+    #[tokio::test]
+    async fn brightness_command_in_colour_mode_is_sent_as_colour_data() {
+        let server = server_with_token().await;
+        Mock::given(path("/v1.0/devices/lamp/status"))
+            .respond_with(ok(json!([
+                {"code": "work_mode", "value": "colour"},
+                {"code": "colour_data_v2", "value": "{\"h\":120,\"s\":900,\"v\":1000}"}
+            ])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1.0/devices/lamp/commands"))
+            .and(body_json(json!({"commands": [
+                {"code": "colour_data_v2", "value": "{\"h\":120,\"s\":900,\"v\":400}"}
+            ]})))
+            .respond_with(ok(json!(true)))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        service(&server)
+            .send_light_command("lamp", LightAction::SetBrightness { value: 400 })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn tuya_errors_map_to_ui_error_kinds() {
+        let err: CommandError = TuyaError::Auth("x".into()).into();
+        assert_eq!(err.kind, "auth");
+        let err: CommandError = TuyaError::Network("x".into()).into();
+        assert_eq!(err.kind, "network");
+    }
+}
+```
+
+- [ ] **Step 2: Registrar e ver falhar**
+
+Acrescente `mod service;` em `lib.rs`.
+Run: `cargo test service`
+Expected: FAIL de compilação (`DeviceService`, `CommandError` não existem).
+
+- [ ] **Step 3: Implementar o serviço**
+
+Em `service.rs`, **acima** do módulo de testes:
+
+```rust
+use std::sync::Arc;
+
+use futures::future::join_all;
+use serde::Serialize;
+use tokio::sync::RwLock;
+
+use crate::devices::light::{commands_for, parse_light, LightAction, CATEGORY_LIGHT};
+use crate::devices::{build_view, DeviceView};
+use crate::secrets::{Credentials, SecretStore, StoreError};
+use crate::tuya::client::TuyaClient;
+use crate::tuya::Error as TuyaError;
+
+/// Error shape sent to the UI: `kind` drives behaviour, `message` is shown to the person.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CommandError {
+    pub kind: String,
+    pub message: String,
+}
+
+impl CommandError {
+    fn new(kind: &str, message: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl From<TuyaError> for CommandError {
+    fn from(e: TuyaError) -> Self {
+        let kind = match e {
+            TuyaError::Network(_) => "network",
+            TuyaError::Auth(_) => "auth",
+            TuyaError::Api { .. } => "api",
+            TuyaError::Decode(_) => "decode",
+        };
+        Self::new(kind, e.to_string())
+    }
+}
+
+impl From<StoreError> for CommandError {
+    fn from(e: StoreError) -> Self {
+        Self::new("storage", e.to_string())
+    }
+}
+
+pub struct DeviceService {
+    store: Arc<dyn SecretStore>,
+    base_url: Option<String>,
+    client: RwLock<Option<Arc<TuyaClient>>>,
+}
+
+impl DeviceService {
+    pub fn new(store: Arc<dyn SecretStore>) -> Self {
+        Self {
+            store,
+            base_url: None,
+            client: RwLock::new(None),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_base_url(store: Arc<dyn SecretStore>, base_url: String) -> Self {
+        Self {
+            base_url: Some(base_url),
+            ..Self::new(store)
+        }
+    }
+
+    pub fn has_credentials(&self) -> Result<bool, CommandError> {
+        Ok(self.store.load()?.is_some())
+    }
+
+    pub async fn save_credentials(&self, credentials: Credentials) -> Result<(), CommandError> {
+        if credentials.access_id.trim().is_empty() || credentials.access_secret.trim().is_empty() {
+            return Err(CommandError::new(
+                "invalid_input",
+                "Access ID e Access Secret são obrigatórios.",
+            ));
+        }
+        let trimmed = Credentials {
+            access_id: credentials.access_id.trim().to_string(),
+            access_secret: credentials.access_secret.trim().to_string(),
+            region: credentials.region,
+        };
+        self.store.save(&trimmed)?;
+        *self.client.write().await = None;
+        Ok(())
+    }
+
+    async fn client(&self) -> Result<Arc<TuyaClient>, CommandError> {
+        if let Some(client) = self.client.read().await.as_ref() {
+            return Ok(client.clone());
+        }
+        let credentials = self.store.load()?.ok_or_else(|| {
+            CommandError::new("no_credentials", "Configure suas credenciais Tuya.")
+        })?;
+        let client = Arc::new(match &self.base_url {
+            Some(url) => TuyaClient::new(url.clone(), credentials.access_id, credentials.access_secret),
+            None => TuyaClient::for_region(
+                credentials.region,
+                credentials.access_id,
+                credentials.access_secret,
+            ),
+        });
+        *self.client.write().await = Some(client.clone());
+        Ok(client)
+    }
+
+    pub async fn list_devices(&self) -> Result<Vec<DeviceView>, CommandError> {
+        let client = self.client().await?;
+        let devices = client.list_devices().await?;
+        let views = join_all(devices.iter().map(|device| {
+            let client = client.clone();
+            async move {
+                let status = if device.category == CATEGORY_LIGHT && device.online {
+                    client.device_status(&device.id).await.ok()
+                } else {
+                    None
+                };
+                build_view(device, status.as_deref())
+            }
+        }))
+        .await;
+        Ok(views)
+    }
+
+    /// Reads the current state first so brightness can respect the lamp's active mode.
+    pub async fn send_light_command(
+        &self,
+        id: &str,
+        action: LightAction,
+    ) -> Result<(), CommandError> {
+        let client = self.client().await?;
+        let state = parse_light(&client.device_status(id).await?);
+        client
+            .send_commands(id, &commands_for(&state, &action))
+            .await?;
+        Ok(())
+    }
+}
+```
+
+- [ ] **Step 4: Ver passar**
+
+Run: `cargo test service`
+Expected: 7 testes passam.
+
+- [ ] **Step 5: Comandos Tauri**
+
+Crie `app/src-tauri/src/commands.rs`:
+
+```rust
+use tauri::State;
+
+use crate::devices::light::LightAction;
+use crate::devices::DeviceView;
+use crate::secrets::Credentials;
+use crate::service::{CommandError, DeviceService};
+use crate::tuya::Region;
+
+#[tauri::command]
+pub fn has_credentials(service: State<'_, DeviceService>) -> Result<bool, CommandError> {
+    service.has_credentials()
+}
+
+#[tauri::command]
+pub async fn save_credentials(
+    service: State<'_, DeviceService>,
+    access_id: String,
+    access_secret: String,
+    region: Region,
+) -> Result<(), CommandError> {
+    service
+        .save_credentials(Credentials {
+            access_id,
+            access_secret,
+            region,
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn list_devices(
+    service: State<'_, DeviceService>,
+) -> Result<Vec<DeviceView>, CommandError> {
+    service.list_devices().await
+}
+
+#[tauri::command]
+pub async fn send_light_command(
+    service: State<'_, DeviceService>,
+    id: String,
+    action: LightAction,
+) -> Result<(), CommandError> {
+    service.send_light_command(&id, action).await
+}
+```
+
+Acrescente `mod commands;` em `lib.rs` e rode `cargo check` (Expected: sem erros; avisos de código não usado são esperados até a Task 7).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app/src-tauri
+git commit -m "feat(service): device service and Tauri commands"
+```
+
+---
+
+### Task 7: Bandeja, janela popup e atualização periódica
+
+**Files:**
+- Create: `app/src-tauri/src/popup.rs`, `app/src-tauri/src/shell.rs`
+- Modify: `app/src-tauri/src/lib.rs` (versão final)
+
+**Interfaces:**
+- Consumes: `DeviceService`, comandos da Task 6.
+- Produces: `popup::{Rect, popup_position(tray: Rect, win: (u32,u32), screen: (u32,u32)) -> (i32,i32), ClickAction{Show,Hide,Ignore}, click_action(visible: bool, ms_since_blur_hide: Option<u128>) -> ClickAction}`; `shell::{PopupState, setup(&tauri::App)}`. Eventos emitidos ao frontend: `popup-shown`, `devices-updated` (payload `DeviceView[]`), `devices-error` (payload `{kind,message}`), `open-settings`.
+
+- [ ] **Step 1: Escrever os testes da lógica do popup**
+
+Crie `popup.rs` com **apenas** este módulo de testes (cobre o Review Focus 2 e os limites da tela):
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SCREEN: (u32, u32) = (1920, 1080);
+    const WIN: (u32, u32) = (360, 480);
+
+    #[test]
+    fn popup_sits_centered_above_a_bottom_taskbar_icon() {
+        let tray = Rect { x: 1700, y: 1040, w: 24, h: 40 };
+        let (x, y) = popup_position(tray, WIN, SCREEN);
+        assert_eq!(x, 1700 + 12 - 180);
+        assert_eq!(y, 1040 - 480 - 8);
+    }
+
+    #[test]
+    fn popup_is_pushed_inside_the_right_edge() {
+        let tray = Rect { x: 1900, y: 1040, w: 20, h: 40 };
+        let (x, _) = popup_position(tray, WIN, SCREEN);
+        assert_eq!(x, 1920 - 360 - 8);
+    }
+
+    #[test]
+    fn popup_is_pushed_inside_the_left_edge() {
+        let tray = Rect { x: 0, y: 1040, w: 20, h: 40 };
+        let (x, _) = popup_position(tray, WIN, SCREEN);
+        assert_eq!(x, 8);
+    }
+
+    #[test]
+    fn popup_opens_below_a_top_taskbar_icon() {
+        let tray = Rect { x: 1700, y: 0, w: 24, h: 40 };
+        let (_, y) = popup_position(tray, WIN, SCREEN);
+        assert_eq!(y, 40 + 8);
+    }
+
+    #[test]
+    fn popup_larger_than_the_screen_still_returns_a_position() {
+        let tray = Rect { x: 10, y: 700, w: 20, h: 40 };
+        let (x, y) = popup_position(tray, (800, 900), (640, 720));
+        assert_eq!((x, y), (8, 8));
+    }
+
+    #[test]
+    fn click_toggles_visibility() {
+        assert_eq!(click_action(true, None), ClickAction::Hide);
+        assert_eq!(click_action(false, None), ClickAction::Show);
+    }
+
+    #[test]
+    fn click_right_after_a_blur_hide_is_ignored_so_it_does_not_reopen() {
+        assert_eq!(click_action(false, Some(40)), ClickAction::Ignore);
+        assert_eq!(click_action(false, Some(900)), ClickAction::Show);
+    }
+}
+```
+
+- [ ] **Step 2: Registrar e ver falhar**
+
+Acrescente `mod popup;` em `lib.rs`.
+Run: `cargo test popup`
+Expected: FAIL de compilação (`popup_position`, `click_action` não existem).
+
+- [ ] **Step 3: Implementar a lógica do popup**
+
+Em `popup.rs`, **acima** dos testes:
+
+```rust
+//! Pure logic for the tray popup: where it goes and what a tray click should do.
+
+const MARGIN: i32 = 8;
+/// A tray click arriving this soon after the blur-hide is the same click that closed the popup.
+const BLUR_CLICK_WINDOW_MS: u128 = 250;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+}
+
+/// Top-left corner (physical pixels) for a popup of `win` size, next to the tray icon `tray`
+/// and kept fully inside the `screen`.
+pub fn popup_position(tray: Rect, win: (u32, u32), screen: (u32, u32)) -> (i32, i32) {
+    let (win_w, win_h) = (win.0 as i32, win.1 as i32);
+    let (screen_w, screen_h) = (screen.0 as i32, screen.1 as i32);
+
+    let centered_x = tray.x + tray.w as i32 / 2 - win_w / 2;
+    let x = centered_x.min(screen_w - win_w - MARGIN).max(MARGIN);
+
+    let taskbar_at_bottom = tray.y > screen_h / 2;
+    let y = if taskbar_at_bottom {
+        tray.y - win_h - MARGIN
+    } else {
+        tray.y + tray.h as i32 + MARGIN
+    };
+    let y = y.min(screen_h - win_h - MARGIN).max(MARGIN);
+    (x, y)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickAction {
+    Show,
+    Hide,
+    Ignore,
+}
+
+pub fn click_action(visible: bool, ms_since_blur_hide: Option<u128>) -> ClickAction {
+    if visible {
+        ClickAction::Hide
+    } else if ms_since_blur_hide.is_some_and(|ms| ms < BLUR_CLICK_WINDOW_MS) {
+        ClickAction::Ignore
+    } else {
+        ClickAction::Show
+    }
+}
+```
+
+- [ ] **Step 4: Ver passar**
+
+Run: `cargo test popup`
+Expected: 7 testes passam.
+
+- [ ] **Step 5: Bandeja, janela e laço de atualização**
+
+Crie `app/src-tauri/src/shell.rs`:
+
+```rust
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WindowEvent};
+
+use crate::popup::{click_action, popup_position, ClickAction, Rect};
+use crate::service::DeviceService;
+
+const MAIN_WINDOW: &str = "main";
+const TRAY_ID: &str = "main";
+const REFRESH_EVERY: Duration = Duration::from_secs(10);
+
+/// When the popup was last hidden because it lost focus.
+#[derive(Default)]
+pub struct PopupState {
+    last_blur_hide: Mutex<Option<Instant>>,
+}
+
+pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let settings = MenuItem::with_id(app, "settings", "Configurações", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&settings, &quit])?;
+
+    TrayIconBuilder::with_id(TRAY_ID)
+        .icon(
+            app.default_window_icon()
+                .cloned()
+                .ok_or("o app precisa de um ícone padrão")?,
+        )
+        .tooltip("Positivo Tray")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "settings" => {
+                show_popup(app, tray_rect(app));
+                let _ = app.emit("open-settings", ());
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                rect,
+                ..
+            } = event
+            {
+                toggle_popup(tray.app_handle(), rect);
+            }
+        })
+        .build(app)?;
+
+    let handle = app.handle().clone();
+    let window = app
+        .get_webview_window(MAIN_WINDOW)
+        .ok_or("janela principal não encontrada")?;
+    window.on_window_event(move |event| {
+        if let WindowEvent::Focused(false) = event {
+            if let Some(window) = handle.get_webview_window(MAIN_WINDOW) {
+                let _ = window.hide();
+            }
+            *handle.state::<PopupState>().last_blur_hide.lock().unwrap() = Some(Instant::now());
+        }
+    });
+
+    spawn_refresh_loop(app.handle().clone());
+    Ok(())
+}
+
+fn tray_rect(app: &AppHandle) -> Option<tauri::Rect> {
+    app.tray_by_id(TRAY_ID)?.rect().ok().flatten()
+}
+
+fn toggle_popup(app: &AppHandle, rect: tauri::Rect) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return;
+    };
+    let since_blur = app
+        .state::<PopupState>()
+        .last_blur_hide
+        .lock()
+        .unwrap()
+        .map(|at| at.elapsed().as_millis());
+    match click_action(window.is_visible().unwrap_or(false), since_blur) {
+        ClickAction::Hide => {
+            let _ = window.hide();
+        }
+        ClickAction::Ignore => {}
+        ClickAction::Show => show_popup(app, Some(rect)),
+    }
+}
+
+fn show_popup(app: &AppHandle, rect: Option<tauri::Rect>) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return;
+    };
+    match rect {
+        Some(rect) => {
+            let scale = window.scale_factor().unwrap_or(1.0);
+            let pos = rect.position.to_physical::<i32>(scale);
+            let size = rect.size.to_physical::<u32>(scale);
+            let monitor = app
+                .monitor_from_point(pos.x as f64, pos.y as f64)
+                .ok()
+                .flatten()
+                .or_else(|| app.primary_monitor().ok().flatten());
+            if let (Some(monitor), Ok(win)) = (monitor, window.outer_size()) {
+                let origin = monitor.position();
+                let relative = Rect {
+                    x: pos.x - origin.x,
+                    y: pos.y - origin.y,
+                    w: size.width,
+                    h: size.height,
+                };
+                let screen = (monitor.size().width, monitor.size().height);
+                let (x, y) = popup_position(relative, (win.width, win.height), screen);
+                let _ = window.set_position(PhysicalPosition::new(x + origin.x, y + origin.y));
+            }
+        }
+        None => {
+            let _ = window.center();
+        }
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+    let _ = app.emit("popup-shown", ());
+}
+
+/// While the popup is visible, push fresh device status to the UI every few seconds.
+fn spawn_refresh_loop(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(REFRESH_EVERY).await;
+            let visible = app
+                .get_webview_window(MAIN_WINDOW)
+                .and_then(|w| w.is_visible().ok())
+                .unwrap_or(false);
+            if !visible {
+                continue;
+            }
+            let service = app.state::<DeviceService>();
+            match service.list_devices().await {
+                Ok(devices) => {
+                    let _ = app.emit("devices-updated", devices);
+                }
+                Err(error) => {
+                    let _ = app.emit("devices-error", error);
+                }
+            }
+        }
+    });
+}
+```
+
+Substitua `app/src-tauri/src/lib.rs` pela versão final (instância única, serviço, estado do popup, comandos e `shell::setup`):
+
+```rust
+mod commands;
+mod devices;
+mod popup;
+mod secrets;
+mod service;
+mod shell;
+mod tuya;
+
+use std::sync::Arc;
+
+use secrets::KeyringStore;
+use service::DeviceService;
+use shell::PopupState;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        // A second launch would add a second tray icon; do nothing instead.
+        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+        .manage(DeviceService::new(Arc::new(KeyringStore::new("positivo-tray"))))
+        .manage(PopupState::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::has_credentials,
+            commands::save_credentials,
+            commands::list_devices,
+            commands::send_light_command
+        ])
+        .setup(|app| shell::setup(app))
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+```
+
+- [ ] **Step 6: Verificar tudo no Rust**
+
+Run (em `app/src-tauri`): `cargo test`
+Expected: `45 passed; 0 failed; 2 ignored`, sem avisos de compilação.
+
+Run: `cargo check`
+Expected: `Finished` sem erros. (O comportamento visual da bandeja é verificado na Task 10, com o frontend.)
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add app/src-tauri
+git commit -m "feat(shell): tray icon, popup window and refresh loop"
+```
+
+---
+
+### Task 8: Lógica do frontend (tipos, aparência da lâmpada, store)
+
+**Files:**
+- Create: `app/src/lib/types.ts`, `app/src/lib/light.ts`, `app/src/lib/light.test.ts`, `app/src/lib/api.ts`, `app/src/lib/devices.svelte.ts`, `app/src/lib/devices.test.ts`
+
+**Interfaces:**
+- Consumes: comandos e eventos da Task 7 (`has_credentials`, `save_credentials`, `list_devices`, `send_light_command`, `devices-updated`, `devices-error`, `popup-shown`, `open-settings`).
+- Produces: tipos `DeviceView`, `LightState`, `LightAction`, `AppError`, `Region`; `applyAction(state, action)`, `bulbColor(state)`, `glowStrength(state)`, `effectiveBrightness(state)`; `interface Api`, `tauriApi`, `toAppError`, `onDevicesUpdated/onDevicesError/onPopupShown/onOpenSettings`; `class DeviceStore(api)` com `devices`, `error`, `loading`, `screen` (`'devices'|'settings'`) e `start()`, `refresh()`, `receive(devices)`, `fail(error)`, `sendLight(id, action)`, `saveCredentials(id, secret, region)`, `openSettings()`, `closeSettings()`.
+
+- [ ] **Step 1: Escrever os testes**
+
+`app/src/lib/light.test.ts`:
+
+```typescript
+import { describe, expect, it } from 'vitest';
+import { applyAction, bulbColor, effectiveBrightness, glowStrength } from './light';
+import type { LightState } from './types';
+
+const base: LightState = {
+  on: true,
+  mode: 'white',
+  brightness: 500,
+  temperature: 0,
+  hue: 120,
+  saturation: 900,
+  value: 800
+};
+
+describe('applyAction', () => {
+  it('set_power only flips the switch', () => {
+    expect(applyAction(base, { type: 'set_power', on: false })).toEqual({ ...base, on: false });
+  });
+
+  it('set_brightness changes brightness in white mode and value in colour mode', () => {
+    expect(applyAction(base, { type: 'set_brightness', value: 300 }).brightness).toBe(300);
+    const colour = { ...base, mode: 'colour' as const };
+    const next = applyAction(colour, { type: 'set_brightness', value: 300 });
+    expect(next.value).toBe(300);
+    expect(next.brightness).toBe(500);
+  });
+
+  it('set_brightness never goes below 10 or above 1000', () => {
+    expect(applyAction(base, { type: 'set_brightness', value: 0 }).brightness).toBe(10);
+    expect(applyAction(base, { type: 'set_brightness', value: 5000 }).brightness).toBe(1000);
+  });
+
+  it('set_temperature and set_colour switch the mode', () => {
+    const colour = { ...base, mode: 'colour' as const };
+    expect(applyAction(colour, { type: 'set_temperature', value: 700 })).toMatchObject({ mode: 'white', temperature: 700 });
+    expect(applyAction(base, { type: 'set_colour', h: 10, s: 20, v: 30 })).toMatchObject({
+      mode: 'colour',
+      hue: 10,
+      saturation: 20,
+      value: 30
+    });
+  });
+});
+
+describe('bulb appearance', () => {
+  it('is grey and has no glow when off', () => {
+    const off = { ...base, on: false };
+    expect(bulbColor(off)).toBe('#3b4050');
+    expect(glowStrength(off)).toBe(0);
+  });
+
+  it('white mode goes from warm to cool with temperature', () => {
+    expect(bulbColor({ ...base, temperature: 0 })).toBe('rgb(255, 180, 107)');
+    expect(bulbColor({ ...base, temperature: 1000 })).toBe('rgb(207, 227, 255)');
+  });
+
+  it('colour mode shows the hue at full value', () => {
+    const red = { ...base, mode: 'colour' as const, hue: 0, saturation: 1000 };
+    expect(bulbColor(red)).toBe('rgb(255, 0, 0)');
+    expect(bulbColor({ ...red, hue: 120 })).toBe('rgb(0, 255, 0)');
+    expect(bulbColor({ ...red, hue: 360 })).toBe('rgb(255, 0, 0)');
+  });
+
+  it('glow grows with brightness between 0.25 and 1', () => {
+    expect(glowStrength({ ...base, brightness: 10 })).toBeCloseTo(0.25);
+    expect(glowStrength({ ...base, brightness: 1000 })).toBeCloseTo(1);
+  });
+
+  it('effectiveBrightness follows the mode', () => {
+    expect(effectiveBrightness(base)).toBe(500);
+    expect(effectiveBrightness({ ...base, mode: 'colour' })).toBe(800);
+  });
+});
+```
+
+`app/src/lib/devices.test.ts` (inclui o Review Focus 5):
+
+```typescript
+import { describe, expect, it, vi } from 'vitest';
+import type { Api } from './api';
+import { DeviceStore } from './devices.svelte';
+import type { DeviceView, LightState } from './types';
+
+const light: LightState = {
+  on: true,
+  mode: 'white',
+  brightness: 500,
+  temperature: 0,
+  hue: 0,
+  saturation: 1000,
+  value: 1000
+};
+const lamp: DeviceView = { id: 'lamp', name: 'Luz', category: 'dj', online: true, light };
+
+function fakeApi(over: Partial<Api> = {}): Api {
+  return {
+    hasCredentials: vi.fn().mockResolvedValue(true),
+    saveCredentials: vi.fn().mockResolvedValue(undefined),
+    listDevices: vi.fn().mockResolvedValue([lamp]),
+    sendLightCommand: vi.fn().mockResolvedValue(undefined),
+    ...over
+  };
+}
+
+describe('DeviceStore', () => {
+  it('start goes to settings when there are no credentials', async () => {
+    const store = new DeviceStore(fakeApi({ hasCredentials: vi.fn().mockResolvedValue(false) }));
+    await store.start();
+    expect(store.screen).toBe('settings');
+  });
+
+  it('start loads devices when credentials exist', async () => {
+    const store = new DeviceStore(fakeApi());
+    await store.start();
+    expect(store.devices).toEqual([lamp]);
+    expect(store.error).toBeNull();
+  });
+
+  it('a failed refresh keeps the old devices and records the error', async () => {
+    const api = fakeApi();
+    const store = new DeviceStore(api);
+    await store.refresh();
+    api.listDevices = vi.fn().mockRejectedValue({ kind: 'network', message: 'sem conexão' });
+    await store.refresh();
+    expect(store.devices).toEqual([lamp]);
+    expect(store.error).toEqual({ kind: 'network', message: 'sem conexão' });
+  });
+
+  it('a no_credentials error opens settings', async () => {
+    const store = new DeviceStore(
+      fakeApi({ listDevices: vi.fn().mockRejectedValue({ kind: 'no_credentials', message: 'x' }) })
+    );
+    await store.refresh();
+    expect(store.screen).toBe('settings');
+  });
+
+  it('sendLight updates the card immediately and calls the API', async () => {
+    let release!: () => void;
+    const api = fakeApi({
+      sendLightCommand: vi.fn().mockImplementation(() => new Promise<void>((r) => (release = r)))
+    });
+    const store = new DeviceStore(api);
+    await store.refresh();
+    const sending = store.sendLight('lamp', { type: 'set_power', on: false });
+    expect(store.devices[0].light?.on).toBe(false);
+    release();
+    await sending;
+    expect(api.sendLightCommand).toHaveBeenCalledWith('lamp', { type: 'set_power', on: false });
+    expect(store.devices[0].light?.on).toBe(false);
+  });
+
+  it('sendLight reverts the card and shows the error when the API fails', async () => {
+    const store = new DeviceStore(
+      fakeApi({ sendLightCommand: vi.fn().mockRejectedValue({ kind: 'api', message: 'falhou' }) })
+    );
+    await store.refresh();
+    await store.sendLight('lamp', { type: 'set_power', on: false });
+    expect(store.devices[0].light?.on).toBe(true);
+    expect(store.error?.message).toBe('falhou');
+  });
+
+  it('background updates are ignored while a command is in flight', async () => {
+    let release!: () => void;
+    const store = new DeviceStore(
+      fakeApi({ sendLightCommand: vi.fn().mockImplementation(() => new Promise<void>((r) => (release = r))) })
+    );
+    await store.refresh();
+    const sending = store.sendLight('lamp', { type: 'set_power', on: false });
+    store.receive([lamp]);
+    expect(store.devices[0].light?.on).toBe(false);
+    release();
+    await sending;
+    store.receive([lamp]);
+    expect(store.devices[0].light?.on).toBe(true);
+  });
+
+  it('sendLight on an unknown or offline device does nothing', async () => {
+    const api = fakeApi({ listDevices: vi.fn().mockResolvedValue([{ ...lamp, online: false, light: null }]) });
+    const store = new DeviceStore(api);
+    await store.refresh();
+    await store.sendLight('lamp', { type: 'set_power', on: true });
+    await store.sendLight('ghost', { type: 'set_power', on: true });
+    expect(api.sendLightCommand).not.toHaveBeenCalled();
+  });
+
+  it('saving credentials returns to the device list and refreshes', async () => {
+    const api = fakeApi();
+    const store = new DeviceStore(api);
+    store.openSettings();
+    await store.saveCredentials('id', 'secret', 'us');
+    expect(api.saveCredentials).toHaveBeenCalledWith('id', 'secret', 'us');
+    expect(store.screen).toBe('devices');
+    expect(store.devices).toEqual([lamp]);
+  });
+});
+```
+
+- [ ] **Step 2: Ver falhar**
+
+Run (em `app`): `npx vitest run`
+Expected: FAIL (`Failed to resolve import './light'` e `'./devices.svelte'`).
+
+- [ ] **Step 3: Implementar**
+
+`app/src/lib/types.ts`:
+
+```typescript
+export type LightMode = 'white' | 'colour';
+
+export interface LightState {
+  on: boolean;
+  mode: LightMode;
+  /** 10..1000, used in white mode */
+  brightness: number;
+  /** 0 (warm) .. 1000 (cool) */
+  temperature: number;
+  /** 0..360 */
+  hue: number;
+  /** 0..1000 */
+  saturation: number;
+  /** 10..1000, brightness in colour mode */
+  value: number;
+}
+
+export interface DeviceView {
+  id: string;
+  name: string;
+  category: string;
+  online: boolean;
+  light: LightState | null;
+}
+
+export type LightAction =
+  | { type: 'set_power'; on: boolean }
+  | { type: 'set_brightness'; value: number }
+  | { type: 'set_temperature'; value: number }
+  | { type: 'set_colour'; h: number; s: number; v: number };
+
+export interface AppError {
+  kind: string;
+  message: string;
+}
+
+export type Region = 'us' | 'eu' | 'cn' | 'in';
+```
+
+`app/src/lib/light.ts`:
+
+```typescript
+import type { LightAction, LightState } from './types';
+
+const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
+
+/** The brightness the slider shows: `value` in colour mode, `brightness` in white mode. */
+export function effectiveBrightness(s: LightState): number {
+  return s.mode === 'colour' ? s.value : s.brightness;
+}
+
+/** What the lamp will look like after `action`, used to update the card before Tuya answers. */
+export function applyAction(s: LightState, action: LightAction): LightState {
+  switch (action.type) {
+    case 'set_power':
+      return { ...s, on: action.on };
+    case 'set_brightness': {
+      const value = clamp(action.value, 10, 1000);
+      return s.mode === 'colour' ? { ...s, value } : { ...s, brightness: value };
+    }
+    case 'set_temperature':
+      return { ...s, mode: 'white', temperature: clamp(action.value, 0, 1000) };
+    case 'set_colour':
+      return {
+        ...s,
+        mode: 'colour',
+        hue: clamp(action.h, 0, 360),
+        saturation: clamp(action.s, 0, 1000),
+        value: clamp(action.v, 10, 1000)
+      };
+  }
+}
+
+const WARM = [255, 180, 107];
+const COOL = [207, 227, 255];
+const OFF = '#3b4050';
+
+function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  const [r, g, b] =
+    h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+/** CSS colour of the bulb icon: grey when off, tinted by temperature or hue when on. */
+export function bulbColor(s: LightState): string {
+  if (!s.on) return OFF;
+  if (s.mode === 'colour') {
+    const [r, g, b] = hsvToRgb(clamp(s.hue, 0, 359.99), clamp(s.saturation, 0, 1000) / 1000, 1);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+  const t = clamp(s.temperature, 0, 1000) / 1000;
+  const [r, g, b] = WARM.map((w, i) => Math.round(w + (COOL[i] - w) * t));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+/** 0.25 (dimmest) .. 1 (brightest) glow strength; 0 when off. */
+export function glowStrength(s: LightState): number {
+  if (!s.on) return 0;
+  return 0.25 + 0.75 * ((clamp(effectiveBrightness(s), 10, 1000) - 10) / 990);
+}
+```
+
+`app/src/lib/api.ts`:
+
+```typescript
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { AppError, DeviceView, LightAction, Region } from './types';
+
+/** The calls the UI needs from the Rust core. The store depends on this, not on Tauri. */
+export interface Api {
+  hasCredentials(): Promise<boolean>;
+  saveCredentials(accessId: string, accessSecret: string, region: Region): Promise<void>;
+  listDevices(): Promise<DeviceView[]>;
+  sendLightCommand(id: string, action: LightAction): Promise<void>;
+}
+
+export function toAppError(e: unknown): AppError {
+  if (typeof e === 'object' && e !== null && 'kind' in e && 'message' in e) {
+    const { kind, message } = e as AppError;
+    return { kind: String(kind), message: String(message) };
+  }
+  return { kind: 'unknown', message: e instanceof Error ? e.message : String(e) };
+}
+
+export const tauriApi: Api = {
+  hasCredentials: () => invoke<boolean>('has_credentials'),
+  saveCredentials: (accessId, accessSecret, region) =>
+    invoke('save_credentials', { accessId, accessSecret, region }),
+  listDevices: () => invoke<DeviceView[]>('list_devices'),
+  sendLightCommand: (id, action) => invoke('send_light_command', { id, action })
+};
+
+export const onDevicesUpdated = (cb: (d: DeviceView[]) => void): Promise<UnlistenFn> =>
+  listen<DeviceView[]>('devices-updated', (e) => cb(e.payload));
+export const onDevicesError = (cb: (e: AppError) => void): Promise<UnlistenFn> =>
+  listen<AppError>('devices-error', (e) => cb(toAppError(e.payload)));
+export const onPopupShown = (cb: () => void): Promise<UnlistenFn> =>
+  listen('popup-shown', () => cb());
+export const onOpenSettings = (cb: () => void): Promise<UnlistenFn> =>
+  listen('open-settings', () => cb());
+```
+
+`app/src/lib/devices.svelte.ts`:
+
+```typescript
+import { toAppError, type Api } from './api';
+import { applyAction } from './light';
+import type { AppError, DeviceView, LightAction, Region } from './types';
+
+export type Screen = 'devices' | 'settings';
+
+export class DeviceStore {
+  devices = $state<DeviceView[]>([]);
+  error = $state<AppError | null>(null);
+  loading = $state(false);
+  screen = $state<Screen>('devices');
+
+  /** Commands in flight. Background updates are ignored meanwhile so they cannot undo the optimistic change. */
+  private pending = 0;
+
+  constructor(private api: Api) {}
+
+  /** First load: go to settings when nothing is configured yet. */
+  async start() {
+    try {
+      if (!(await this.api.hasCredentials())) {
+        this.screen = 'settings';
+        return;
+      }
+    } catch (e) {
+      this.error = toAppError(e);
+      return;
+    }
+    await this.refresh();
+  }
+
+  async refresh() {
+    this.loading = true;
+    try {
+      this.devices = await this.api.listDevices();
+      this.error = null;
+    } catch (e) {
+      this.fail(toAppError(e));
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  /** Push update from the Rust refresh loop. */
+  receive(devices: DeviceView[]) {
+    if (this.pending > 0) return;
+    this.devices = devices;
+    this.error = null;
+  }
+
+  fail(error: AppError) {
+    this.error = error;
+    if (error.kind === 'no_credentials') this.screen = 'settings';
+  }
+
+  async sendLight(id: string, action: LightAction) {
+    const before = this.devices.find((d) => d.id === id);
+    if (!before?.light) return;
+    const previousLight = before.light;
+    this.setLight(id, applyAction(previousLight, action));
+    this.pending++;
+    try {
+      await this.api.sendLightCommand(id, action);
+    } catch (e) {
+      this.setLight(id, previousLight);
+      this.fail(toAppError(e));
+    } finally {
+      this.pending--;
+    }
+  }
+
+  async saveCredentials(accessId: string, accessSecret: string, region: Region) {
+    await this.api.saveCredentials(accessId, accessSecret, region);
+    this.screen = 'devices';
+    this.error = null;
+    await this.refresh();
+  }
+
+  openSettings() {
+    this.screen = 'settings';
+  }
+
+  closeSettings() {
+    this.screen = 'devices';
+  }
+
+  private setLight(id: string, light: DeviceView['light']) {
+    this.devices = this.devices.map((d) => (d.id === id ? { ...d, light } : d));
+  }
+}
+```
+
+- [ ] **Step 4: Ver passar**
+
+Run: `npx vitest run`
+Expected: `Test Files 2 passed`, `Tests 18 passed`.
+
+Run: `npm run check`
+Expected: `0 ERRORS 0 WARNINGS`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/src
+git commit -m "feat(ui): device store, optimistic updates and bulb appearance"
+```
+
+---
+
+### Task 9: Cards, tela de configuração e página principal
+
+**Files:**
+- Create: `app/src/lib/LightCard.svelte`, `app/src/lib/InactiveCard.svelte`, `app/src/lib/Settings.svelte`, `app/src/lib/components.test.ts`
+- Modify: `app/src/routes/+page.svelte`
+
+**Interfaces:**
+- Consumes: `DeviceStore`, `tauriApi`, `onDevicesUpdated`, `onDevicesError`, `onPopupShown`, `onOpenSettings`, `bulbColor`, `glowStrength`, `effectiveBrightness`, tipos da Task 8.
+- Produces: `LightCard` (props `device`, `light`, `onaction`), `InactiveCard` (prop `device`), `Settings` (props `onsave(id, secret, region): Promise<void>`, `oncancel?`), página que liga tudo.
+
+- [ ] **Step 1: Escrever os testes dos componentes**
+
+`app/src/lib/components.test.ts`:
+
+```typescript
+import { fireEvent, render, screen } from '@testing-library/svelte';
+import { describe, expect, it, vi } from 'vitest';
+import InactiveCard from './InactiveCard.svelte';
+import LightCard from './LightCard.svelte';
+import Settings from './Settings.svelte';
+import type { DeviceView, LightState } from './types';
+
+const light: LightState = {
+  on: true,
+  mode: 'white',
+  brightness: 500,
+  temperature: 100,
+  hue: 120,
+  saturation: 900,
+  value: 800
+};
+const device: DeviceView = { id: 'lamp', name: 'Luz do PC', category: 'dj', online: true, light };
+
+describe('LightCard', () => {
+  it('clicking the bulb toggles power', async () => {
+    const onaction = vi.fn();
+    render(LightCard, { device, light, onaction });
+    await fireEvent.click(screen.getByRole('button', { name: 'Desligar Luz do PC' }));
+    expect(onaction).toHaveBeenCalledWith({ type: 'set_power', on: false });
+  });
+
+  it('an off lamp offers to turn on', () => {
+    render(LightCard, { device, light: { ...light, on: false }, onaction: vi.fn() });
+    expect(screen.getByRole('button', { name: 'Ligar Luz do PC' })).toBeTruthy();
+    expect(screen.getByText('Desligada')).toBeTruthy();
+  });
+
+  it('controls are hidden until the card is expanded', async () => {
+    render(LightCard, { device, light, onaction: vi.fn() });
+    expect(screen.queryByLabelText('Brilho')).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'Ajustes de Luz do PC' }));
+    expect(screen.getByLabelText('Brilho')).toBeTruthy();
+  });
+
+  it('white mode shows temperature, not hue', async () => {
+    render(LightCard, { device, light, onaction: vi.fn() });
+    await fireEvent.click(screen.getByRole('button', { name: 'Ajustes de Luz do PC' }));
+    expect(screen.getByLabelText('Temperatura')).toBeTruthy();
+    expect(screen.queryByLabelText('Matiz')).toBeNull();
+  });
+
+  it('colour mode shows hue and saturation, not temperature', async () => {
+    render(LightCard, { device, light: { ...light, mode: 'colour' }, onaction: vi.fn() });
+    await fireEvent.click(screen.getByRole('button', { name: 'Ajustes de Luz do PC' }));
+    expect(screen.getByLabelText('Matiz')).toBeTruthy();
+    expect(screen.getByLabelText('Saturação')).toBeTruthy();
+    expect(screen.queryByLabelText('Temperatura')).toBeNull();
+  });
+
+  it('moving sliders sends the matching action', async () => {
+    const onaction = vi.fn();
+    render(LightCard, { device, light, onaction });
+    await fireEvent.click(screen.getByRole('button', { name: 'Ajustes de Luz do PC' }));
+    await fireEvent.change(screen.getByLabelText('Brilho'), { target: { value: '300' } });
+    expect(onaction).toHaveBeenLastCalledWith({ type: 'set_brightness', value: 300 });
+    await fireEvent.change(screen.getByLabelText('Temperatura'), { target: { value: '700' } });
+    expect(onaction).toHaveBeenLastCalledWith({ type: 'set_temperature', value: 700 });
+  });
+
+  it('hue slider keeps the current saturation and value', async () => {
+    const onaction = vi.fn();
+    render(LightCard, { device, light: { ...light, mode: 'colour' }, onaction });
+    await fireEvent.click(screen.getByRole('button', { name: 'Ajustes de Luz do PC' }));
+    await fireEvent.change(screen.getByLabelText('Matiz'), { target: { value: '200' } });
+    expect(onaction).toHaveBeenLastCalledWith({ type: 'set_colour', h: 200, s: 900, v: 800 });
+  });
+
+  it('the Cor button switches to colour using the remembered colour', async () => {
+    const onaction = vi.fn();
+    render(LightCard, { device, light, onaction });
+    await fireEvent.click(screen.getByRole('button', { name: 'Ajustes de Luz do PC' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Cor' }));
+    expect(onaction).toHaveBeenCalledWith({ type: 'set_colour', h: 120, s: 900, v: 800 });
+  });
+});
+
+describe('InactiveCard', () => {
+  const base = { ...device, light: null };
+
+  it('explains why a device has no controls', () => {
+    const { unmount } = render(InactiveCard, { device: { ...base, online: false } });
+    expect(screen.getByText('Offline')).toBeTruthy();
+    unmount();
+    const second = render(InactiveCard, { device: { ...base, category: 'cz' } });
+    expect(screen.getByText('Ainda não suportado')).toBeTruthy();
+    second.unmount();
+    render(InactiveCard, { device: base });
+    expect(screen.getByText('Sem resposta')).toBeTruthy();
+  });
+});
+
+describe('Settings', () => {
+  it('does not submit empty credentials', async () => {
+    const onsave = vi.fn();
+    render(Settings, { onsave });
+    await fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    expect(onsave).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('Preencha');
+  });
+
+  it('submits the typed values with the chosen region', async () => {
+    const onsave = vi.fn().mockResolvedValue(undefined);
+    render(Settings, { onsave });
+    await fireEvent.input(screen.getByLabelText('Access ID'), { target: { value: 'abc' } });
+    await fireEvent.input(screen.getByLabelText('Access Secret'), { target: { value: 'xyz' } });
+    await fireEvent.change(screen.getByLabelText('Região'), { target: { value: 'eu' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    expect(onsave).toHaveBeenCalledWith('abc', 'xyz', 'eu');
+  });
+
+  it('shows the error when saving fails', async () => {
+    const onsave = vi.fn().mockRejectedValue({ kind: 'storage', message: 'cofre indisponível' });
+    render(Settings, { onsave });
+    await fireEvent.input(screen.getByLabelText('Access ID'), { target: { value: 'abc' } });
+    await fireEvent.input(screen.getByLabelText('Access Secret'), { target: { value: 'xyz' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('cofre indisponível');
+  });
+
+  it('cancel is only offered when a handler is given', () => {
+    const { unmount } = render(Settings, { onsave: vi.fn() });
+    expect(screen.queryByRole('button', { name: 'Cancelar' })).toBeNull();
+    unmount();
+    render(Settings, { onsave: vi.fn(), oncancel: vi.fn() });
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toBeTruthy();
+  });
+});
+```
+
+- [ ] **Step 2: Ver falhar**
+
+Run: `npx vitest run components`
+Expected: FAIL (`Failed to resolve import './LightCard.svelte'`).
+
+- [ ] **Step 3: Implementar os componentes**
+
+`app/src/lib/LightCard.svelte`:
+
+```svelte
+<script lang="ts">
+  import { bulbColor, effectiveBrightness, glowStrength } from './light';
+  import type { DeviceView, LightAction, LightState } from './types';
+
+  let { device, light, onaction }: { device: DeviceView; light: LightState; onaction: (a: LightAction) => void } =
+    $props();
+
+  let expanded = $state(false);
+
+  const color = $derived(bulbColor(light));
+  const glow = $derived(glowStrength(light));
+
+  const num = (e: Event) => Number((e.currentTarget as HTMLInputElement).value);
+</script>
+
+<article class="card" class:on={light.on}>
+  <div class="row">
+    <button
+      class="bulb"
+      aria-label={`${light.on ? 'Desligar' : 'Ligar'} ${device.name}`}
+      aria-pressed={light.on}
+      style:background={color}
+      style:box-shadow={light.on ? `0 0 ${8 + 28 * glow}px ${color}` : 'none'}
+      onclick={() => onaction({ type: 'set_power', on: !light.on })}
+    ></button>
+    <div class="name">
+      <strong>{device.name}</strong>
+      <span>{light.on ? (light.mode === 'colour' ? 'Cor' : 'Branco') : 'Desligada'}</span>
+    </div>
+    <button class="chevron" aria-label={`Ajustes de ${device.name}`} aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
+      {expanded ? '▴' : '▾'}
+    </button>
+  </div>
+
+  {#if expanded}
+    <div class="controls">
+      <div class="modes" role="group" aria-label="Modo">
+        <button
+          class:active={light.mode === 'white'}
+          onclick={() => onaction({ type: 'set_temperature', value: light.temperature })}>Branco</button
+        >
+        <button
+          class:active={light.mode === 'colour'}
+          onclick={() => onaction({ type: 'set_colour', h: light.hue, s: light.saturation, v: light.value })}>Cor</button
+        >
+      </div>
+
+      <label>
+        Brilho
+        <input
+          type="range"
+          min="10"
+          max="1000"
+          value={effectiveBrightness(light)}
+          onchange={(e) => onaction({ type: 'set_brightness', value: num(e) })}
+        />
+      </label>
+
+      {#if light.mode === 'white'}
+        <label>
+          Temperatura
+          <input
+            class="temp"
+            type="range"
+            min="0"
+            max="1000"
+            value={light.temperature}
+            onchange={(e) => onaction({ type: 'set_temperature', value: num(e) })}
+          />
+        </label>
+      {:else}
+        <label>
+          Matiz
+          <input
+            class="hue"
+            type="range"
+            min="0"
+            max="360"
+            value={light.hue}
+            onchange={(e) => onaction({ type: 'set_colour', h: num(e), s: light.saturation, v: light.value })}
+          />
+        </label>
+        <label>
+          Saturação
+          <input
+            type="range"
+            min="0"
+            max="1000"
+            value={light.saturation}
+            onchange={(e) => onaction({ type: 'set_colour', h: light.hue, s: num(e), v: light.value })}
+          />
+        </label>
+      {/if}
+    </div>
+  {/if}
+</article>
+
+<style>
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .bulb {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 2px solid rgb(255 255 255 / 0.15);
+    cursor: pointer;
+    flex: none;
+    transition: box-shadow 0.2s, background 0.2s;
+  }
+  .name {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .name strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .name span {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .chevron {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px 8px;
+  }
+  .controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  input[type='range'] {
+    width: 100%;
+  }
+  .temp {
+    accent-color: #ffb46b;
+  }
+  .hue {
+    accent-color: #8b5cf6;
+  }
+  .modes {
+    display: flex;
+    gap: 6px;
+  }
+  .modes button {
+    flex: 1;
+    padding: 6px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .modes button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+</style>
+```
+
+`app/src/lib/InactiveCard.svelte`:
+
+```svelte
+<script lang="ts">
+  import type { DeviceView } from './types';
+
+  let { device }: { device: DeviceView } = $props();
+
+  const reason = $derived(
+    device.category !== 'dj' ? 'Ainda não suportado' : !device.online ? 'Offline' : 'Sem resposta'
+  );
+</script>
+
+<article class="card">
+  <div class="dot"></div>
+  <div class="name">
+    <strong>{device.name}</strong>
+    <span>{reason}</span>
+  </div>
+</article>
+
+<style>
+  .card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    opacity: 0.55;
+  }
+  .dot {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #3b4050;
+    flex: none;
+  }
+  .name {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .name strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .name span {
+    font-size: 12px;
+    color: var(--muted);
+  }
+</style>
+```
+
+`app/src/lib/Settings.svelte`:
+
+```svelte
+<script lang="ts">
+  import { toAppError } from './api';
+  import type { Region } from './types';
+
+  let {
+    onsave,
+    oncancel
+  }: {
+    onsave: (accessId: string, accessSecret: string, region: Region) => Promise<void>;
+    oncancel?: () => void;
+  } = $props();
+
+  let accessId = $state('');
+  let accessSecret = $state('');
+  let region = $state<Region>('us');
+  let message = $state('');
+  let saving = $state(false);
+
+  async function submit(e: Event) {
+    e.preventDefault();
+    if (!accessId.trim() || !accessSecret.trim()) {
+      message = 'Preencha o Access ID e o Access Secret.';
+      return;
+    }
+    saving = true;
+    message = '';
+    try {
+      await onsave(accessId, accessSecret, region);
+    } catch (err) {
+      message = toAppError(err).message;
+    } finally {
+      saving = false;
+    }
+  }
+</script>
+
+<form onsubmit={submit}>
+  <h2>Credenciais Tuya</h2>
+  <p class="hint">Copie do projeto em iot.tuya.com (aba Overview). Ficam guardadas no Gerenciador de Credenciais do Windows.</p>
+
+  <label>
+    Access ID
+    <input bind:value={accessId} autocomplete="off" spellcheck="false" />
+  </label>
+  <label>
+    Access Secret
+    <input type="password" bind:value={accessSecret} autocomplete="off" />
+  </label>
+  <label>
+    Região
+    <select bind:value={region}>
+      <option value="us">Western America (us)</option>
+      <option value="eu">Central Europe (eu)</option>
+      <option value="cn">China (cn)</option>
+      <option value="in">India (in)</option>
+    </select>
+  </label>
+
+  {#if message}<p class="error" role="alert">{message}</p>{/if}
+
+  <div class="actions">
+    {#if oncancel}<button type="button" class="ghost" onclick={oncancel}>Cancelar</button>{/if}
+    <button type="submit" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
+  </div>
+</form>
+
+<style>
+  form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  h2 {
+    margin: 0;
+    font-size: 16px;
+  }
+  .hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  input,
+  select {
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+  }
+  .error {
+    margin: 0;
+    color: var(--danger);
+    font-size: 13px;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  button {
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  button.ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  button:disabled {
+    opacity: 0.6;
+  }
+</style>
+```
+
+Substitua `app/src/routes/+page.svelte`:
+
+```svelte
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { onDevicesError, onDevicesUpdated, onOpenSettings, onPopupShown, tauriApi } from '$lib/api';
+  import { DeviceStore } from '$lib/devices.svelte';
+  import InactiveCard from '$lib/InactiveCard.svelte';
+  import LightCard from '$lib/LightCard.svelte';
+  import Settings from '$lib/Settings.svelte';
+
+  const store = new DeviceStore(tauriApi);
+
+  onMount(() => {
+    store.start();
+    const unlisten = Promise.all([
+      onPopupShown(() => store.refresh()),
+      onDevicesUpdated((d) => store.receive(d)),
+      onDevicesError((e) => store.fail(e)),
+      onOpenSettings(() => store.openSettings())
+    ]);
+    return () => {
+      unlisten.then((fns) => fns.forEach((fn) => fn()));
+    };
+  });
+</script>
+
+<main>
+  {#if store.screen === 'settings'}
+    <Settings
+      onsave={(id, secret, region) => store.saveCredentials(id, secret, region)}
+      oncancel={store.devices.length > 0 ? () => store.closeSettings() : undefined}
+    />
+  {:else}
+    <header>
+      <h1>Dispositivos</h1>
+      <button class="refresh" aria-label="Atualizar" onclick={() => store.refresh()} disabled={store.loading}>↻</button>
+    </header>
+
+    {#if store.error}
+      <div class="banner" role="alert">
+        <span>{store.error.message}</span>
+        {#if store.error.kind === 'auth'}
+          <button onclick={() => store.openSettings()}>Configurações</button>
+        {/if}
+      </div>
+    {/if}
+
+    <section>
+      {#each store.devices as device (device.id)}
+        {#if device.light}
+          <LightCard {device} light={device.light} onaction={(a) => store.sendLight(device.id, a)} />
+        {:else}
+          <InactiveCard {device} />
+        {/if}
+      {:else}
+        {#if !store.loading && !store.error}<p class="empty">Nenhum dispositivo encontrado.</p>{/if}
+      {/each}
+    </section>
+  {/if}
+</main>
+
+<style>
+  :global(:root) {
+    --bg: #14161c;
+    --surface: #1e2129;
+    --border: #2d313c;
+    --text: #e8eaf0;
+    --muted: #8b91a1;
+    --accent: #4f6bed;
+    --danger: #ff6b6b;
+  }
+  :global(html, body) {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    overflow: hidden;
+  }
+  main {
+    height: 100vh;
+    box-sizing: border-box;
+    padding: 14px;
+    overflow-y: auto;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  h1 {
+    margin: 0;
+    font-size: 16px;
+  }
+  .refresh {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+  }
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    background: rgb(255 107 107 / 0.12);
+    color: var(--danger);
+    font-size: 13px;
+  }
+  .banner button {
+    background: none;
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .empty {
+    color: var(--muted);
+    text-align: center;
+  }
+</style>
+```
+
+- [ ] **Step 4: Ver passar e construir**
+
+Run: `npx vitest run`
+Expected: `Test Files 3 passed`, `Tests 31 passed`.
+
+Run: `npm run check`
+Expected: `0 ERRORS 0 WARNINGS`.
+
+Run: `npm run build`
+Expected: `Wrote site to "build"`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/src
+git commit -m "feat(ui): light card, inactive card, settings and main page"
+```
+
+---
+
+### Task 10: Verificação manual com a lâmpada real e README
+
+**Files:**
+- Create: `app/README.md`
+
+**Interfaces:**
+- Consumes: tudo acima.
+
+- [ ] **Step 1: Rodar o app em desenvolvimento**
+
+Run (em `app`): `npm run tauri dev`
+Expected: o app compila e abre **sem janela visível**; aparece um ícone na bandeja do Windows (pode ficar na área de ícones ocultos `^`).
+
+- [ ] **Step 2: Primeira execução**
+
+Clique no ícone com o botão esquerdo. Expected: a janela abre acima do ícone, mostrando "Credenciais Tuya". **A pessoa** digita Access ID, Access Secret e região (`us` para a conta usada no spike) e clica em Salvar. Expected: a lista aparece com o card `Luz do PC`.
+
+- [ ] **Step 3: Checklist de comportamento (marque cada item)**
+
+- [ ] A bolinha do card tem a cor real da lâmpada; clicar nela liga/desliga a lâmpada física.
+- [ ] Expandir o card mostra Brilho e Temperatura (modo Branco); "Cor" troca para Matiz e Saturação; "Branco" volta.
+- [ ] Mexer nos controles muda a lâmpada física e o card atualiza na hora.
+- [ ] Mudar a lâmpada pelo app Smart Life no celular reflete no app em até ~10 s com a janela aberta.
+- [ ] Clicar fora da janela fecha; clicar no ícone com a janela aberta fecha e **não reabre** (Review Focus 2).
+- [ ] Clique direito no ícone: "Configurações" abre a janela na tela de credenciais (com Cancelar); "Sair" encerra o app.
+- [ ] Abrir o app uma segunda vez não cria um segundo ícone.
+- [ ] Desligar o Wi-Fi do PC e clicar em Atualizar mostra o aviso de erro sem apagar os cards; religar e atualizar remove o aviso.
+- [ ] Reiniciar o app mantém as credenciais (nada é pedido de novo).
+- [ ] Com a janela fechada, nenhuma chamada à Tuya é feita (confirme no console da Tuya ou observando que o log do `tauri dev` não mostra atividade).
+
+Se algum item falhar, corrija na tarefa dona do código (Rust: 3 a 7; interface: 8 e 9), com um teste que reproduza a falha quando for possível.
+
+- [ ] **Step 4: README**
+
+`app/README.md`:
+
+```markdown
+# Positivo Tray
+
+App de bandeja do Windows para controlar dispositivos Positivo Casa Inteligente (Tuya) pela nuvem.
+
+## Pré-requisitos
+
+- Os dispositivos precisam estar pareados no app **Smart Life** (o app Positivo não deixa vincular a conta a um projeto Tuya IoT).
+- Projeto em iot.tuya.com com a conta do Smart Life vinculada (Devices → Link App Account) e os serviços IoT Core, Authorization Token Management e Smart Home Basic Service ativos.
+- Rust, Node.js e o WebView2 do Windows.
+
+## Rodar
+
+    npm install
+    npm run tauri dev
+
+Na primeira execução, informe Access ID, Access Secret e a região do projeto. Ficam no Gerenciador de Credenciais do Windows.
+
+## Testes
+
+    npm test                      # frontend
+    cd src-tauri && cargo test    # núcleo Rust
+
+Teste ao vivo contra a API Tuya (usa variáveis de ambiente `TUYA_ACCESS_ID`, `TUYA_ACCESS_KEY`, `TUYA_REGION`):
+
+    cargo test live_smoke -- --ignored --nocapture
+```
+
+- [ ] **Step 5: Confirmar que o instalador compila**
+
+Run (em `app`): `npm run tauri build -- --no-bundle`
+Expected: termina sem erro e gera `app/src-tauri/target/release/app.exe`. (Compilação em modo release com LTO, pode levar vários minutos.)
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app/README.md
+git commit -m "docs: README and manual verification of v1"
+```
+
+---
+
+## Self-Review (feita ao escrever o plano)
+
+**Cobertura do spec:** bandeja + popup ancorado, fechar ao perder foco, menu direito (Task 7); atualização a cada 10 s só com a janela visível (Task 7, `spawn_refresh_loop`, verificado na Task 10); tela de configuração na primeira execução (Tasks 8-9, `DeviceStore.start`); credenciais no Gerenciador de Credenciais (Task 5); cliente com token e renovação (Task 3); driver `dj` com escalas Tuya (Task 4); card com cor/brilho reais, liga/desliga, controles expansíveis, offline cinza (Task 9); fluxo otimista com reversão (Task 8); erros (token, rede, credencial) (Tasks 3, 6, 8, 9); testes unitários, cliente com servidor falso, componentes e verificação manual (todas as tarefas).
+
+**Desvios do spec, deliberados:**
+- Comando `send_light_command` em vez de `send_command` (ver nota na Task 6).
+- O esqueleto do `create-tauri-app` para Svelte é SvelteKit em modo SPA (adapter-static) com Vite por baixo; atende "Svelte com Vite".
+- Acrescentado `tauri-plugin-single-instance` para evitar um segundo ícone se o app for aberto duas vezes (pequeno, sem impacto no resto).
+- Cartão cinza "Ainda não suportado" para dispositivos de outras categorias (o spec só dizia que a v1 controla a lâmpada).
+
+**Tipos consistentes:** `LightState`/`LightAction`/`DeviceView` têm os mesmos campos em Rust (`serde`) e em `types.ts` (`brightness`, `temperature`, `hue`, `saturation`, `value`; ações `set_power|set_brightness|set_temperature|set_colour`). Os eventos e comandos usados em `api.ts` batem com os de `shell.rs`/`lib.rs`.
+
+**Pontos que dependem de confirmação em campo (não de código):** códigos de erro da Tuya `1010`, `1004` e `1005` foram escolhidos a partir da documentação de erros comuns; o teste ao vivo da Task 3 prova assinatura e fluxo, mas não o caminho de token expirado real. Limites do plano gratuito da Tuya continuam em aberto (riscos do spec).

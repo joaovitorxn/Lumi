@@ -1,0 +1,10 @@
+spike/.env
+spike/devices.json
+spike/.venv/
+app/node_modules/
+app/build/
+app/.svelte-kit/
+app/src-tauri/target/
+app/src-tauri/gen/
+.env
+.superpowers/
