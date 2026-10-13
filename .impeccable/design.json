@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-12T00:00:00Z",
+  "title": "Design System: Positivo Desktop",
+  "extensions": {
+    "colorMeta": {
+      "ground": { "role": "neutral", "displayName": "Graphite Ground", "canonical": "#0d0d0f", "tonalRamp": ["#070708", "#0d0d0f", "#17171a", "#1f1f23", "#2e2e33", "#5d5b57", "#8c8a86", "#ece8e1"] },
+      "ink": { "role": "neutral", "displayName": "Warm Ink", "canonical": "#ece8e1", "tonalRamp": ["#2e2e33", "#5d5b57", "#74726e", "#8c8a86", "#b5b1aa", "#cfc9bf", "#e9e4da", "#ece8e1"] },
+      "accent": { "role": "primary", "displayName": "Warm Off-White Accent", "canonical": "#e9e4da", "tonalRamp": ["#5d5b57", "#8c8a86", "#b5b1aa", "#cfcac1", "#e9e4da", "#f1ede6", "#f7f4ef", "#ffffff"] },
+      "lamp-fallback": { "role": "primary", "displayName": "Lamp Light (live, via --light)", "canonical": "rgb(255 196 120)", "tonalRamp": ["rgb(255 196 120 / 0.16)", "rgb(255 196 120 / 0.34)", "rgb(255 196 120 / 0.4)", "rgb(255 196 120 / 0.62)", "rgb(255 196 120 / 0.78)", "rgb(255 196 120 / 0.9)", "rgb(255 196 120)", "#ffdca8"] }
+    },
+    "typographyMeta": {
+      "numeral": { "displayName": "Numeral", "purpose": "Brightness percent only. Bahnschrift Light, tabular." },
+      "title": { "displayName": "Title", "purpose": "Device name on the unsupported/offline panel." },
+      "body": { "displayName": "Body", "purpose": "Default Segoe UI text." },
+      "value": { "displayName": "Value", "purpose": "Tile values and readout label, 600." },
+      "caption": { "displayName": "Caption", "purpose": "Pills, footer, labels, muted." }
+    },
+    "shadows": [
+      { "name": "raised", "value": "inset 0 1px 0 rgb(255 255 255 / 0.08), 0 2px 4px rgb(0 0 0 / 0.5)", "purpose": "Steppers, tiles, power button." },
+      { "name": "cream-thumb", "value": "0 2px 6px rgb(0 0 0 / 0.6), inset 0 1px 0 #fff, inset 0 -2px 0 rgb(0 0 0 / 0.12)", "purpose": "Main slider thumb." },
+      { "name": "inset-track", "value": "inset 0 3px 8px rgb(0 0 0 / 0.9), inset 0 -1px 0 rgb(255 255 255 / 0.05)", "purpose": "Main slider channel." },
+      { "name": "lit-edge", "value": "inset 0 2px 0 rgb(var(--light) / 0.9)", "purpose": "Selected tile top edge in lamp light." }
+    ],
+    "motion": [
+      { "name": "ease-out", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "All transitions. Press 0.15s, state 0.25 to 0.6s, pool scale 0.8s, stage enter 0.45s." },
+      { "name": "reduced-motion", "value": "durations 0.001ms under prefers-reduced-motion", "purpose": "Global override in theme.css." }
+    ],
+    "breakpoints": [
+      { "name": "popup", "value": "360x560 fixed" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Power Button (off)",
+      "kind": "button",
+      "refersTo": "power-off",
+      "description": "Cream raised pill shown when the lamp is off.",
+      "html": "<button class=\"ds-power\" aria-label=\"Ligar\">&#9211;</button>",
+      "css": ".ds-power{width:42px;height:42px;border-radius:50%;border:1px solid transparent;color:#1d1a15;background:linear-gradient(#f1ede6,#cfcac1);box-shadow:inset 0 1px 0 #fff,0 2px 6px rgb(0 0 0 / .6);cursor:pointer;transition:transform .15s cubic-bezier(.16,1,.3,1)}.ds-power:active{transform:scale(.94)}.ds-power:focus-visible{outline:2px solid #e9e4da;outline-offset:2px}"
+    },
+    {
+      "name": "Power Button (on)",
+      "kind": "button",
+      "refersTo": "power-on",
+      "description": "Lit in the lamp's own colour.",
+      "html": "<button class=\"ds-power-on\" aria-label=\"Desligar\">&#9211;</button>",
+      "css": ".ds-power-on{--light:255 196 120;width:42px;height:42px;border-radius:50%;border:1px solid transparent;color:#1a1208;background:linear-gradient(rgb(var(--light)),rgb(var(--light) / .78));box-shadow:inset 0 1px 0 rgb(255 255 255 / .45),0 2px 8px rgb(0 0 0 / .5);cursor:pointer}.ds-power-on:focus-visible{outline:2px solid #e9e4da;outline-offset:2px}"
+    },
+    {
+      "name": "Stepper",
+      "kind": "button",
+      "refersTo": "stepper",
+      "description": "Ringed raised round button beside the main slider.",
+      "html": "<button class=\"ds-step\" aria-label=\"Diminuir\">&minus;</button>",
+      "css": ".ds-step{width:40px;height:40px;border-radius:50%;color:#8c8a86;background:linear-gradient(#222226,#18181b);border:1px solid #2e2e33;box-shadow:inset 0 1px 0 rgb(255 255 255 / .08),0 2px 4px rgb(0 0 0 / .5);cursor:pointer;transition:transform .15s cubic-bezier(.16,1,.3,1)}.ds-step:active{transform:scale(.92)}.ds-step:focus-visible{outline:2px solid #e9e4da;outline-offset:2px}"
+    },
+    {
+      "name": "Tile (selected)",
+      "kind": "card",
+      "refersTo": "tile-selected",
+      "description": "Raised tile lit by a 2px inset top edge in lamp light.",
+      "html": "<button class=\"ds-tile\"><small>Branco</small><b>2.700 K</b></button>",
+      "css": ".ds-tile{--light:255 196 120;height:64px;width:150px;padding:10px 12px;display:flex;flex-direction:column;justify-content:space-between;text-align:left;border-radius:16px;border:1px solid #3a3a40;background:linear-gradient(#202025,#18181b);color:#ece8e1;box-shadow:inset 0 2px 0 rgb(var(--light) / .9),inset 0 1px 0 rgb(255 255 255 / .06),0 2px 4px rgb(0 0 0 / .5);cursor:pointer}.ds-tile small{font-size:11.5px;color:#8c8a86}.ds-tile b{font-size:14px;font-weight:600}.ds-tile:focus-visible{outline:2px solid #e9e4da;outline-offset:2px}"
+    },
+    {
+      "name": "Device Pill",
+      "kind": "nav",
+      "refersTo": "device-pill-selected",
+      "description": "Capsule switcher with lamp-light dot when selected and lit.",
+      "html": "<button class=\"ds-pill\"><i></i>Luminária</button>",
+      "css": ".ds-pill{--light:255 196 120;display:flex;align-items:center;gap:7px;height:32px;padding:0 12px 0 10px;border-radius:16px;background:#1f1f23;border:1px solid #2e2e33;color:#ece8e1;font-size:12.5px;cursor:pointer}.ds-pill i{width:8px;height:8px;border-radius:50%;background:rgb(var(--light))}.ds-pill:focus-visible{outline:2px solid #e9e4da;outline-offset:-2px}"
+    },
+    {
+      "name": "Main Slider",
+      "kind": "custom",
+      "refersTo": "slider-main-thumb",
+      "description": "Inset track with a light-tinted fill and a cream raised pill thumb.",
+      "html": "<div class=\"ds-slider\"><div class=\"ds-fill\"></div><div class=\"ds-thumb\"></div></div>",
+      "css": ".ds-slider{--light:255 196 120;position:relative;width:300px;height:44px;border-radius:22px;background:#070708;box-shadow:inset 0 3px 8px rgb(0 0 0 / .9),inset 0 -1px 0 rgb(255 255 255 / .05)}.ds-fill{position:absolute;inset:0 auto 0 0;width:170px;border-radius:22px;background:linear-gradient(180deg,rgb(var(--light) / .62),rgb(var(--light) / .4))}.ds-thumb{position:absolute;top:4px;left:118px;width:52px;height:36px;border-radius:18px;background:linear-gradient(90deg,transparent 0 41%,rgb(0 0 0 / .22) 41% 44%,transparent 44% 56%,rgb(0 0 0 / .22) 56% 59%,transparent 59%),linear-gradient(#f1ede6,#cfcac1);box-shadow:0 2px 6px rgb(0 0 0 / .6),inset 0 1px 0 #fff,inset 0 -2px 0 rgb(0 0 0 / .12)}"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Filled warm off-white, Settings only.",
+      "html": "<button class=\"ds-btn\">Salvar</button>",
+      "css": ".ds-btn{padding:10px 18px;border-radius:12px;border:1px solid transparent;background:#e9e4da;color:#16130f;font-weight:600;cursor:pointer;transition:transform .15s cubic-bezier(.16,1,.3,1),background .2s}.ds-btn:hover{background:color-mix(in srgb,#e9e4da 88%,#fff)}.ds-btn:active{transform:scale(.97)}.ds-btn:focus-visible{outline:2px solid #e9e4da;outline-offset:2px}"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Settings input; focus swaps border to the accent.",
+      "html": "<input class=\"ds-input\" value=\"Access ID\">",
+      "css": ".ds-input{padding:10px 12px;border-radius:12px;border:1px solid #2e2e33;background:#17171a;color:#ece8e1;font:inherit;transition:border-color .2s}.ds-input:hover{border-color:rgb(255 255 255 / .22)}.ds-input:focus-visible{outline:none;border-color:#e9e4da;box-shadow:0 0 0 3px color-mix(in srgb,#e9e4da 25%,transparent)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Lit Instrument",
+    "overview": "A dark graphite console in which one device sits in focus, drawn as an object, and the only chroma on screen is that lamp's own light. The light reaches the window as a single channel triple, --light (\"r g b\"), consumed by the bulb glass, the floor pool, an ambient wash, the slider fill, the selected-tile top edge, the selected-pill dot and the lit power button. Everything else is neutral.\n\nControls have weight: tracks are inset, thumbs and buttons are raised with a 1px inner top highlight and a small downward shadow. The popup is a fixed 360x560 window, one device per screen, switched with pills.",
+    "keyCharacteristics": [
+      "Graphite neutrals, warm ink, no second chroma: focus and selection use the warm off-white accent.",
+      "Chroma comes only from the focused lamp (--light), plus control tracks that show the value they set.",
+      "Physical controls: inset track, cream raised thumb, ringed raised round steppers, raised tiles.",
+      "Bahnschrift Light numerals; Segoe UI for everything else.",
+      "Exponential ease-out motion; reduced motion respected globally.",
+      "Hand-authored SVG illustration."
+    ],
+    "rules": [
+      { "name": "The Borrowed Light Rule", "body": "The lamp is the only chroma. Anything that needs colour reads rgb(var(--light) / alpha); nothing else is saturated.", "section": "colors" },
+      { "name": "The Same Warm White Rule", "body": "Focus, selection and the primary button share the accent #e9e4da, so interaction never introduces a hue.", "section": "colors" },
+      { "name": "The Readout Rule", "body": "Large light numerals are Bahnschrift with tabular figures; no other text uses it.", "section": "typography" },
+      { "name": "The Offset Shadow Rule", "body": "Every shadow has a downward offset. No zero-offset coloured halos.", "section": "elevation" },
+      { "name": "The Lit Edge Rule", "body": "Selection on a raised tile is a 2px inset top edge in lamp light, not a fill or outline.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do route every lamp-derived colour through --light, with alpha.",
+      "Do build new controls as inset-or-raised objects with a 1px top highlight and a downward shadow.",
+      "Do use var(--ease-out) (cubic-bezier(0.16, 1, 0.3, 1)) for all transitions; 0.15s press, 0.25 to 0.6s state.",
+      "Do keep text at 4.5:1 or better against graphite and keep the fixed 360x560 frame.",
+      "Do give inline SVG gradients per-instance ids."
+    ],
+    "donts": [
+      "Don't add a second accent hue; use #e9e4da for focus and selection.",
+      "Don't use zero-offset coloured halos or neon glow around controls.",
+      "Don't replace the single focused device with a list of identical rows each with a switch.",
+      "Don't set the numeral in anything but Bahnschrift Light with tabular figures.",
+      "Don't use bare opacity changes for state without a transition, and don't override reduced-motion."
+    ]
+  }
+}

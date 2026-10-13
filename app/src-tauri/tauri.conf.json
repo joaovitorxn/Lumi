@@ -15,7 +15,7 @@
         "label": "main",
         "title": "Positivo Tray",
         "width": 360,
-        "height": 480,
+        "height": 560,
         "visible": false,
         "decorations": false,
         "resizable": false,

@@ -2,12 +2,20 @@
   import { onMount } from 'svelte';
   import { onDevicesError, onDevicesUpdated, onOpenSettings, onPopupShown, tauriApi } from '$lib/api';
   import { DeviceStore } from '$lib/devices.svelte';
-  import Icon from '$lib/Icon.svelte';
-  import InactiveCard from '$lib/InactiveCard.svelte';
-  import LightCard from '$lib/LightCard.svelte';
+  import DeviceSwitcher from '$lib/DeviceSwitcher.svelte';
+  import InactivePanel from '$lib/InactivePanel.svelte';
+  import { lampLight } from '$lib/light';
+  import LightPanel from '$lib/LightPanel.svelte';
+  import PowerButton from '$lib/PowerButton.svelte';
   import Settings from '$lib/Settings.svelte';
+  import SyncFooter from '$lib/SyncFooter.svelte';
 
   const store = new DeviceStore(tauriApi);
+
+  let selectedId = $state('');
+  const selected = $derived(store.devices.find((d) => d.id === selectedId) ?? store.devices[0]);
+  /** The focused lamp's light tints the whole window, so the colour on screen is always the real one. */
+  const look = $derived(selected?.light ? lampLight(selected.light) : undefined);
 
   onMount(() => {
     store.start();
@@ -23,189 +31,111 @@
   });
 </script>
 
-<main>
+<main style:--light={look?.rgb ?? '0 0 0'}>
   {#if store.screen === 'settings'}
-    <Settings
-      onsave={(id, secret, region) => store.saveCredentials(id, secret, region)}
-      oncancel={store.configured ? () => store.closeSettings() : undefined}
-    />
+    <div class="pad">
+      <Settings
+        onsave={(id, secret, region) => store.saveCredentials(id, secret, region)}
+        oncancel={store.configured ? () => store.closeSettings() : undefined}
+      />
+    </div>
   {:else}
     <header>
-      <div class="title">
-        <h1>Dispositivos</h1>
-        <span class="state" class:bad={!!store.error}>
-          <span class="led"></span>{store.error ? 'Sem conexão' : 'Conectado'}
-        </span>
-      </div>
-      <div class="tools">
-        <button class="icon-btn" aria-label="Atualizar" onclick={() => store.refresh()} disabled={store.loading}>
-          <span class:spin={store.loading}><Icon name="refresh" size={18} /></span>
-        </button>
-        <button class="icon-btn" aria-label="Configurações" onclick={() => store.openSettings()}>
-          <Icon name="settings" size={18} />
-        </button>
-      </div>
+      <DeviceSwitcher devices={store.devices} selectedId={selected?.id ?? ''} onselect={(id) => (selectedId = id)} />
+      {#if selected?.light}
+        {@const light = selected.light}
+        <PowerButton
+          name={selected.name}
+          on={light.on}
+          onclick={() => store.sendLight(selected.id, { type: 'set_power', on: !light.on })}
+        />
+      {/if}
     </header>
 
-    {#if store.error}
-      <div class="banner" role="alert">
-        <Icon name="alert" size={18} />
-        <span>{store.error.message}</span>
-        {#if store.error.kind === 'auth'}
-          <button onclick={() => store.openSettings()}>Configurações</button>
-        {/if}
-      </div>
-    {/if}
-
-    <section>
-      {#each store.devices as device, i (device.id)}
-        <div class="item" style:--i={i}>
-          {#if device.light}
-            <LightCard {device} light={device.light} onaction={(a) => store.sendLight(device.id, a)} />
+    {#if selected}
+      {#key selected.id}
+        <div class="stage">
+          {#if selected.light}
+            <LightPanel device={selected} light={selected.light} stale={!!store.error} onaction={(a) => store.sendLight(selected.id, a)} />
           {:else}
-            <InactiveCard {device} />
+            <InactivePanel device={selected} />
           {/if}
         </div>
-      {:else}
-        {#if store.loading}
-          <div class="skeleton"></div>
-          <div class="skeleton short"></div>
-        {:else if !store.error}
-          <p class="empty">Nenhum dispositivo encontrado.</p>
-        {/if}
-      {/each}
-    </section>
+      {/key}
+    {:else if store.loading}
+      <div class="stage"><div class="skeleton"></div></div>
+    {:else}
+      <div class="stage">{#if !store.error}<p class="empty">Nenhum dispositivo encontrado.</p>{/if}</div>
+    {/if}
+
+    <SyncFooter
+      loading={store.loading}
+      error={store.error}
+      lastSync={store.lastSync}
+      onrefresh={() => store.refresh()}
+      onsettings={() => store.openSettings()}
+    />
   {/if}
 </main>
 
 <style>
   main {
+    position: relative;
+    display: flex;
+    flex-direction: column;
     height: 100vh;
-    padding: 16px 14px;
-    overflow-y: auto;
+    overflow: hidden;
+  }
+  /* Ambient wash: the lamp's light falling on the top of the window. */
+  main::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 40% 0;
+    background: radial-gradient(ellipse 70% 70% at 50% 18%, rgb(var(--light) / 0.16), transparent 70%);
+    pointer-events: none;
+    transition: opacity 0.6s var(--ease-out);
   }
 
   header {
+    position: relative;
+    flex: none;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 14px;
+    gap: 10px;
+    padding: 16px 16px 0;
   }
-  h1 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
-  .state {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--muted);
-  }
-  .led {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--ok);
-    transition: background 0.3s;
-  }
-  .bad .led {
-    background: var(--danger);
-  }
-  .tools {
-    display: flex;
-    gap: 2px;
-  }
-  .icon-btn {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    border: none;
-    border-radius: 50%;
-    background: none;
-    color: var(--muted);
-    cursor: pointer;
-    transition:
-      background 0.2s,
-      color 0.2s;
-  }
-  .icon-btn:hover:not(:disabled) {
-    background: var(--surface-hi);
-    color: var(--text);
-  }
-  .icon-btn:disabled {
-    cursor: default;
-  }
-  .spin {
-    display: grid;
-    animation: spin 0.9s linear infinite;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+  header :global(nav) {
+    flex: 1;
   }
 
-  section {
+  .stage {
+    position: relative;
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    animation: enter 0.45s var(--ease-out) both;
   }
-  .item {
-    animation: rise 0.45s var(--ease-out) both;
-    animation-delay: calc(var(--i) * 50ms);
-  }
-  @keyframes rise {
+  @keyframes enter {
     from {
       opacity: 0;
-      transform: translateY(10px);
+      transform: translateY(8px);
     }
   }
 
-  .banner {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
-    margin-bottom: 12px;
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--danger) 12%, var(--surface));
-    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
-    color: var(--danger);
-    font-size: 13px;
-    animation: drop 0.35s var(--ease-out) both;
-  }
-  .banner span {
-    flex: 1;
-    min-width: 0;
-  }
-  .banner button {
-    padding: 4px 10px;
-    border: 1px solid var(--danger);
-    border-radius: 8px;
-    background: none;
-    color: var(--danger);
-    cursor: pointer;
-  }
-  @keyframes drop {
-    from {
-      opacity: 0;
-      transform: translateY(-6px);
-    }
+  .pad {
+    height: 100%;
+    padding: 18px 16px;
+    overflow-y: auto;
   }
 
   .skeleton {
-    height: 72px;
+    margin: 24px 16px;
+    flex: 1;
     border-radius: var(--radius);
     background: linear-gradient(90deg, var(--surface) 30%, var(--surface-hi) 50%, var(--surface) 70%) 0 0 / 300% 100%;
     animation: shimmer 1.4s linear infinite;
-  }
-  .skeleton.short {
-    height: 56px;
-    opacity: 0.6;
   }
   @keyframes shimmer {
     to {
@@ -214,7 +144,7 @@
   }
 
   .empty {
-    margin: 32px 0;
+    margin: auto;
     color: var(--muted);
     text-align: center;
   }

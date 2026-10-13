@@ -157,6 +157,22 @@ describe('DeviceStore', () => {
     expect(store.error?.message).toBe('falhou');
   });
 
+  it('records when the last successful sync happened and ignores failures', async () => {
+    let t = 5_000;
+    const api = fakeApi();
+    const store = new DeviceStore(api, () => t);
+    expect(store.lastSync).toBeNull();
+    await store.refresh();
+    expect(store.lastSync).toBe(5_000);
+    t = 9_000;
+    store.receive([lamp]);
+    expect(store.lastSync).toBe(9_000);
+    t = 12_000;
+    api.listDevices = vi.fn().mockRejectedValue({ kind: 'network', message: 'sem conexão' });
+    await store.refresh();
+    expect(store.lastSync).toBe(9_000);
+  });
+
   it('remembers whether credentials exist so settings can be cancelled', async () => {
     const store = new DeviceStore(fakeApi());
     expect(store.configured).toBe(false);

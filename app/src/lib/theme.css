@@ -1,23 +1,29 @@
 :root {
   color-scheme: dark;
 
-  --bg: #0b0d12;
-  --surface: #14171f;
-  --surface-hi: #1b1f2a;
-  --border: rgb(255 255 255 / 0.07);
-  --border-strong: rgb(255 255 255 / 0.13);
-  --text: #eceef4;
-  --muted: #9ba2b3;
-  --track: #232733;
-  --accent: #ffb454;
+  --bg: #0d0d0f;
+  --surface: #17171a;
+  --surface-hi: #1f1f23;
+  --raise-top: #222226;
+  --raise-bot: #18181b;
+  --border: #232327;
+  --border-strong: #2e2e33;
+  --text: #ece8e1;
+  --muted: #8c8a86;
+  --track: #070708;
+  --accent: #e9e4da;
   --danger: #ff7a7a;
   --ok: #46d39a;
+
+  /* The focused lamp's light as "r g b"; panels override it with the real colour. */
+  --light: 255 196 120;
 
   --radius: 18px;
   --radius-sm: 12px;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-num: Bahnschrift, 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
 }
 
 html,

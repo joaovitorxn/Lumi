@@ -14,6 +14,8 @@ export class DeviceStore {
   screen = $state<Screen>('devices');
   /** True once credentials exist, so the settings screen can always be cancelled. */
   configured = $state(false);
+  /** Timestamp of the last successful read from the cloud, or null before the first one. */
+  lastSync = $state<number | null>(null);
 
   /** Commands in flight per device. */
   private inflight = new Map<string, number>();
@@ -47,6 +49,7 @@ export class DeviceStore {
     try {
       this.devices = this.merge(await this.api.listDevices());
       this.error = null;
+      this.lastSync = this.now();
     } catch (e) {
       this.fail(toAppError(e));
     } finally {
@@ -58,6 +61,7 @@ export class DeviceStore {
   receive(devices: DeviceView[]) {
     this.devices = this.merge(devices);
     this.error = null;
+    this.lastSync = this.now();
   }
 
   fail(error: AppError) {

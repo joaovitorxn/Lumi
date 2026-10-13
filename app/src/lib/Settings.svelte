@@ -144,7 +144,7 @@
   }
   .primary {
     background: var(--accent);
-    color: #2a1a00;
+    color: #16130f;
     font-weight: 600;
   }
   .primary:hover {
