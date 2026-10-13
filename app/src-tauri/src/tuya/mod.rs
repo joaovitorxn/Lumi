@@ -1,3 +1,4 @@
+pub mod client;
 pub mod sign;
 
 use serde::{Deserialize, Serialize};
