@@ -19,13 +19,15 @@ One click on the icon, the light changes. No phone needed.
 
 ## What it is
 
-Lumi is a Windows tray app that controls **Tuya** smart devices through the cloud. The popup opens next to the clock, shows one device at a time and always reflects the lamp's real state.
+Lumi is a Windows tray app that controls **Tuya** smart lights and cameras through the cloud. The popup opens next to the clock, shows one device at a time and always reflects the lamp's real state.
 
 ## Features
 
 - **Brightness, temperature and colour** with tactile sliders. The light's colour tints the whole window.
 - **The lamp illustration follows the brightness** and colour you set, with smooth transitions.
-- **Multiple devices**: switch between them with the pills at the top, and turn them on or off with one button.
+- **Cameras**: live video with sound and picture-in-picture, a pan/tilt pad you hold to move, and privacy and motion-tracking switches.
+- **Multiple devices**: pick one from the dropdown at the top, and turn lamps on or off with one button.
+- **Brightness readout rolls like a slot machine**, and a lit lamp softly glows.
 - **Always-true state**: refreshes automatically every 10 s and clearly shows synced, updating or error.
 - **Three languages**: Português, English and Español, including the tray menu.
 - **Start with Windows** behind a single switch.
@@ -44,6 +46,9 @@ Lumi is a Windows tray app that controls **Tuya** smart devices through the clou
     <td align="center"><img src="docs/screenshots/settings.png" width="240" /><br/><sub>Settings</sub></td>
     <td align="center"><img src="docs/screenshots/credentials.png" width="240" /><br/><sub>Tuya credentials</sub></td>
   </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/camera.png" width="240" /><br/><sub>Camera (video blurred)</sub></td>
+  </tr>
 </table>
 
 ## How it works
@@ -52,7 +57,7 @@ Lumi talks to the **Tuya cloud API**. There is no local protocol and no `local_k
 
 1. Pair your devices in the **Smart Life** app (some white-label vendor apps do not let you link their account to a Tuya IoT project).
 2. On [iot.tuya.com](https://iot.tuya.com), create a project and link your Smart Life account (*Devices → Link App Account*).
-3. Enable the **IoT Core**, **Authorization Token Management** and **Smart Home Basic Service** APIs.
+3. Enable the **IoT Core**, **Authorization Token Management** and **Smart Home Basic Service** APIs. For cameras, also enable **IoT Video Live Stream** (it may need a paid plan after the trial).
 4. Open Lumi and enter the project's **Access ID**, **Access Secret** and region.
 
 ## Development
