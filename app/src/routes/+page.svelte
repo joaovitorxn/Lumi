@@ -26,7 +26,7 @@
   {#if store.screen === 'settings'}
     <Settings
       onsave={(id, secret, region) => store.saveCredentials(id, secret, region)}
-      oncancel={store.devices.length > 0 ? () => store.closeSettings() : undefined}
+      oncancel={store.configured ? () => store.closeSettings() : undefined}
     />
   {:else}
     <header>

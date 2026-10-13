@@ -77,6 +77,21 @@ describe('LightCard', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Cor' }));
     expect(onaction).toHaveBeenCalledWith({ type: 'set_colour', h: 120, s: 900, v: 800 });
   });
+
+  it('clicking the card name also toggles power', async () => {
+    const onaction = vi.fn();
+    render(LightCard, { device, light, onaction });
+    await fireEvent.click(screen.getByText('Luz do PC'));
+    expect(onaction).toHaveBeenCalledWith({ type: 'set_power', on: false });
+  });
+
+  it('brightness in colour mode sends the whole colour, never a bare brightness', async () => {
+    const onaction = vi.fn();
+    render(LightCard, { device, light: { ...light, mode: 'colour' }, onaction });
+    await fireEvent.click(screen.getByRole('button', { name: 'Ajustes de Luz do PC' }));
+    await fireEvent.change(screen.getByLabelText('Brilho'), { target: { value: '300' } });
+    expect(onaction).toHaveBeenLastCalledWith({ type: 'set_colour', h: 120, s: 900, v: 300 });
+  });
 });
 
 describe('InactiveCard', () => {

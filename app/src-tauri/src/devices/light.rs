@@ -111,20 +111,15 @@ fn colour_command(h: u16, s: u16, v: u16) -> Command {
     )
 }
 
-pub fn commands_for(state: &LightState, action: &LightAction) -> Vec<Command> {
+/// Stateless on purpose: the UI sends the full colour when it changes brightness in colour mode,
+/// so no command depends on a (possibly lagging) status read.
+pub fn commands_for(action: &LightAction) -> Vec<Command> {
     match *action {
         LightAction::SetPower { on } => vec![cmd("switch_led", json!(on))],
-        LightAction::SetBrightness { value } => match state.mode {
-            LightMode::White => vec![cmd(
-                "bright_value_v2",
-                json!(value.clamp(BRIGHTNESS.0, BRIGHTNESS.1)),
-            )],
-            LightMode::Colour => vec![colour_command(
-                state.hue,
-                state.saturation,
-                value.clamp(VALUE.0, VALUE.1),
-            )],
-        },
+        LightAction::SetBrightness { value } => vec![cmd(
+            "bright_value_v2",
+            json!(value.clamp(BRIGHTNESS.0, BRIGHTNESS.1)),
+        )],
         LightAction::SetTemperature { value } => vec![
             cmd("work_mode", json!("white")),
             cmd(
@@ -216,51 +211,27 @@ mod tests {
 
     #[test]
     fn set_power_sends_switch_led() {
-        let cmds = commands_for(&LightState::default(), &LightAction::SetPower { on: true });
+        let cmds = commands_for(&LightAction::SetPower { on: true });
         assert_eq!(cmds, vec![cmd("switch_led", json!(true))]);
     }
 
     #[test]
     fn brightness_in_white_mode_uses_bright_value() {
-        let cmds = commands_for(
-            &LightState::default(),
-            &LightAction::SetBrightness { value: 500 },
+        let cmds = commands_for(&LightAction::SetBrightness { value: 500 },
         );
         assert_eq!(cmds, vec![cmd("bright_value_v2", json!(500))]);
     }
 
     #[test]
-    fn brightness_in_colour_mode_changes_the_v_of_the_current_colour() {
-        let state = LightState {
-            mode: LightMode::Colour,
-            hue: 120,
-            saturation: 900,
-            ..LightState::default()
-        };
-        let cmds = commands_for(&state, &LightAction::SetBrightness { value: 400 });
-        assert_eq!(
-            cmds,
-            vec![cmd(
-                "colour_data_v2",
-                json!("{\"h\":120,\"s\":900,\"v\":400}")
-            )]
-        );
-    }
-
-    #[test]
     fn brightness_below_the_minimum_is_raised_to_10() {
-        let cmds = commands_for(
-            &LightState::default(),
-            &LightAction::SetBrightness { value: 0 },
+        let cmds = commands_for(&LightAction::SetBrightness { value: 0 },
         );
         assert_eq!(cmds, vec![cmd("bright_value_v2", json!(10))]);
     }
 
     #[test]
     fn temperature_switches_to_white_mode_first() {
-        let cmds = commands_for(
-            &LightState::default(),
-            &LightAction::SetTemperature { value: 300 },
+        let cmds = commands_for(&LightAction::SetTemperature { value: 300 },
         );
         assert_eq!(
             cmds,
@@ -273,9 +244,7 @@ mod tests {
 
     #[test]
     fn colour_switches_to_colour_mode_and_clamps() {
-        let cmds = commands_for(
-            &LightState::default(),
-            &LightAction::SetColour {
+        let cmds = commands_for(&LightAction::SetColour {
                 h: 400,
                 s: 2000,
                 v: 1,

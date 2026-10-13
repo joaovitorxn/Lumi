@@ -1,4 +1,4 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::Method;
 use serde::Deserialize;
@@ -15,6 +15,9 @@ const CODES_BAD_CREDENTIALS: [i64; 2] = [1004, 1005];
 /// Refresh the token this long before it really expires.
 const TOKEN_MARGIN_MS: u64 = 60_000;
 const MAX_DEVICE_PAGES: usize = 20;
+/// Without a timeout one stalled read would hold the token lock and freeze every call.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Deserialize)]
 struct Envelope {
@@ -48,8 +51,21 @@ fn now_ms() -> u64 {
 
 impl TuyaClient {
     pub fn new(base_url: impl Into<String>, access_id: String, secret: String) -> Self {
+        Self::with_timeout(base_url, access_id, secret, REQUEST_TIMEOUT)
+    }
+
+    pub fn with_timeout(
+        base_url: impl Into<String>,
+        access_id: String,
+        secret: String,
+        timeout: Duration,
+    ) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(timeout)
+                .connect_timeout(CONNECT_TIMEOUT)
+                .build()
+                .expect("HTTP client configuration is valid"),
             base_url: base_url.into(),
             access_id,
             secret,
@@ -454,6 +470,25 @@ mod tests {
     #[tokio::test]
     async fn unreachable_server_is_a_network_error() {
         let c = TuyaClient::new("http://127.0.0.1:1", "id".into(), "secret".into());
+        assert!(matches!(
+            c.list_devices().await.unwrap_err(),
+            Error::Network(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_stalled_response_times_out_as_a_network_error() {
+        let server = MockServer::start().await;
+        Mock::given(path("/v1.0/token"))
+            .respond_with(token_ok(7200).set_delay(std::time::Duration::from_millis(600)))
+            .mount(&server)
+            .await;
+        let c = TuyaClient::with_timeout(
+            server.uri(),
+            "id".into(),
+            "secret".into(),
+            std::time::Duration::from_millis(150),
+        );
         assert!(matches!(
             c.list_devices().await.unwrap_err(),
             Error::Network(_)

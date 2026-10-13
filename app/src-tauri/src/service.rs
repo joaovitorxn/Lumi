@@ -4,7 +4,7 @@ use futures::future::join_all;
 use serde::Serialize;
 use tokio::sync::RwLock;
 
-use crate::devices::light::{commands_for, parse_light, LightAction, CATEGORY_LIGHT};
+use crate::devices::light::{commands_for, LightAction, CATEGORY_LIGHT};
 use crate::devices::{build_view, DeviceView};
 use crate::secrets::{Credentials, SecretStore, StoreError};
 use crate::tuya::client::TuyaClient;
@@ -125,17 +125,13 @@ impl DeviceService {
         Ok(views)
     }
 
-    /// Reads the current state first so brightness can respect the lamp's active mode.
     pub async fn send_light_command(
         &self,
         id: &str,
         action: LightAction,
     ) -> Result<(), CommandError> {
         let client = self.client().await?;
-        let state = parse_light(&client.device_status(id).await?);
-        client
-            .send_commands(id, &commands_for(&state, &action))
-            .await?;
+        client.send_commands(id, &commands_for(&action)).await?;
         Ok(())
     }
 }
@@ -264,19 +260,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn brightness_command_in_colour_mode_is_sent_as_colour_data() {
+    async fn a_command_is_one_call_that_never_reads_the_status_first() {
         let server = server_with_token().await;
         Mock::given(path("/v1.0/devices/lamp/status"))
-            .respond_with(ok(json!([
-                {"code": "work_mode", "value": "colour"},
-                {"code": "colour_data_v2", "value": "{\"h\":120,\"s\":900,\"v\":1000}"}
-            ])))
+            .respond_with(ok(json!([])))
+            .expect(0)
             .mount(&server)
             .await;
         Mock::given(method("POST"))
             .and(path("/v1.0/devices/lamp/commands"))
             .and(body_json(json!({"commands": [
-                {"code": "colour_data_v2", "value": "{\"h\":120,\"s\":900,\"v\":400}"}
+                {"code": "bright_value_v2", "value": 400}
             ]})))
             .respond_with(ok(json!(true)))
             .expect(1)

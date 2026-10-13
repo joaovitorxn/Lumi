@@ -11,22 +11,35 @@
   const glow = $derived(glowStrength(light));
 
   const num = (e: Event) => Number((e.currentTarget as HTMLInputElement).value);
+
+  /** In colour mode brightness is the V of the colour: send the whole colour, never a bare brightness. */
+  function setBrightness(value: number) {
+    onaction(
+      light.mode === 'colour'
+        ? { type: 'set_colour', h: light.hue, s: light.saturation, v: value }
+        : { type: 'set_brightness', value }
+    );
+  }
 </script>
 
 <article class="card" class:on={light.on}>
   <div class="row">
     <button
-      class="bulb"
+      class="toggle"
       aria-label={`${light.on ? 'Desligar' : 'Ligar'} ${device.name}`}
       aria-pressed={light.on}
-      style:background={color}
-      style:box-shadow={light.on ? `0 0 ${8 + 28 * glow}px ${color}` : 'none'}
       onclick={() => onaction({ type: 'set_power', on: !light.on })}
-    ></button>
-    <div class="name">
-      <strong>{device.name}</strong>
-      <span>{light.on ? (light.mode === 'colour' ? 'Cor' : 'Branco') : 'Desligada'}</span>
-    </div>
+    >
+      <span
+        class="bulb"
+        style:background={color}
+        style:box-shadow={light.on ? `0 0 ${8 + 28 * glow}px ${color}` : 'none'}
+      ></span>
+      <span class="name">
+        <strong>{device.name}</strong>
+        <span>{light.on ? (light.mode === 'colour' ? 'Cor' : 'Branco') : 'Desligada'}</span>
+      </span>
+    </button>
     <button class="chevron" aria-label={`Ajustes de ${device.name}`} aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
       {expanded ? '▴' : '▾'}
     </button>
@@ -52,7 +65,7 @@
           min="10"
           max="1000"
           value={effectiveBrightness(light)}
-          onchange={(e) => onaction({ type: 'set_brightness', value: num(e) })}
+          onchange={(e) => setBrightness(num(e))}
         />
       </label>
 
@@ -107,12 +120,25 @@
     align-items: center;
     gap: 12px;
   }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
   .bulb {
     width: 36px;
     height: 36px;
     border-radius: 50%;
     border: 2px solid rgb(255 255 255 / 0.15);
-    cursor: pointer;
     flex: none;
     transition: box-shadow 0.2s, background 0.2s;
   }
@@ -123,6 +149,7 @@
     flex-direction: column;
   }
   .name strong {
+    display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

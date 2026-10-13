@@ -83,8 +83,10 @@ describe('DeviceStore', () => {
 
   it('background updates are ignored while a command is in flight', async () => {
     let release!: () => void;
+    let t = 1_000;
     const store = new DeviceStore(
-      fakeApi({ sendLightCommand: vi.fn().mockImplementation(() => new Promise<void>((r) => (release = r))) })
+      fakeApi({ sendLightCommand: vi.fn().mockImplementation(() => new Promise<void>((r) => (release = r))) }),
+      () => t
     );
     await store.refresh();
     const sending = store.sendLight('lamp', { type: 'set_power', on: false });
@@ -92,6 +94,7 @@ describe('DeviceStore', () => {
     expect(store.devices[0].light?.on).toBe(false);
     release();
     await sending;
+    t += 5_000;
     store.receive([lamp]);
     expect(store.devices[0].light?.on).toBe(true);
   });
@@ -113,5 +116,56 @@ describe('DeviceStore', () => {
     expect(api.saveCredentials).toHaveBeenCalledWith('id', 'secret', 'us');
     expect(store.screen).toBe('devices');
     expect(store.devices).toEqual([lamp]);
+  });
+
+  it('a push that arrives right after a command finished does not undo it', async () => {
+    let t = 1_000;
+    const store = new DeviceStore(fakeApi(), () => t);
+    await store.refresh();
+    await store.sendLight('lamp', { type: 'set_power', on: false });
+    t += 1_000;
+    store.receive([lamp]); // status that was read before the command landed
+    expect(store.devices[0].light?.on).toBe(false);
+    t += 5_000;
+    store.receive([lamp]);
+    expect(store.devices[0].light?.on).toBe(true);
+  });
+
+  it('refresh also keeps a device that was just commanded', async () => {
+    let t = 1_000;
+    const store = new DeviceStore(fakeApi(), () => t);
+    await store.refresh();
+    await store.sendLight('lamp', { type: 'set_power', on: false });
+    t += 1_000;
+    await store.refresh(); // the fake API still reports the old state
+    expect(store.devices[0].light?.on).toBe(false);
+  });
+
+  it('a failed older command does not roll back a newer one', async () => {
+    let rejectFirst!: (e: unknown) => void;
+    const send = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<void>((_, reject) => (rejectFirst = reject)))
+      .mockResolvedValue(undefined);
+    const store = new DeviceStore(fakeApi({ sendLightCommand: send }));
+    await store.refresh();
+    const first = store.sendLight('lamp', { type: 'set_power', on: false });
+    await store.sendLight('lamp', { type: 'set_brightness', value: 300 });
+    rejectFirst({ kind: 'api', message: 'falhou' });
+    await first;
+    expect(store.devices[0].light).toMatchObject({ on: false, brightness: 300 });
+    expect(store.error?.message).toBe('falhou');
+  });
+
+  it('remembers whether credentials exist so settings can be cancelled', async () => {
+    const store = new DeviceStore(fakeApi());
+    expect(store.configured).toBe(false);
+    await store.start();
+    expect(store.configured).toBe(true);
+    const fresh = new DeviceStore(fakeApi({ hasCredentials: vi.fn().mockResolvedValue(false) }));
+    await fresh.start();
+    expect(fresh.configured).toBe(false);
+    await fresh.saveCredentials('id', 'secret', 'us');
+    expect(fresh.configured).toBe(true);
   });
 });
