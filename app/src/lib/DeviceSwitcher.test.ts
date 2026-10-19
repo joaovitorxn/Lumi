@@ -54,6 +54,41 @@ describe('DeviceSwitcher', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
+  it('groups devices by kind, lamps first, keeping their order inside each group', async () => {
+    const mixed: DeviceView[] = [
+      { id: 'p', name: 'Tomada', category: 'cz', online: true, light: null, camera: null },
+      { id: 'x', name: 'Sensor', category: 'wsdcg', online: true, light: null, camera: null },
+      { id: 'k', name: 'Câmera', category: 'sp', online: true, light: null, camera: null },
+      ...devices.slice(0, 2)
+    ];
+    render(DeviceSwitcher, { devices: mixed, selectedId: 'a', onselect: vi.fn() });
+    await fireEvent.click(trigger());
+    const groups = screen.getAllByRole('group');
+    expect(groups.map((g) => g.querySelector('.heading')?.textContent)).toEqual([
+      'Lâmpadas',
+      'Câmeras',
+      'Tomadas',
+      'Outros'
+    ]);
+    expect(screen.getByRole('group', { name: 'Lâmpadas' }).textContent).toMatch(/Luz do PC.*Abajur/);
+    expect(screen.getByRole('group', { name: 'Outros' }).textContent).toContain('Sensor');
+  });
+
+  it('moves focus across groups with the arrow keys', async () => {
+    render(DeviceSwitcher, { devices, selectedId: 'b', onselect: vi.fn() });
+    await fireEvent.click(trigger());
+    expect(document.activeElement?.textContent).toContain('Abajur');
+    await fireEvent.keyDown(screen.getByRole('listbox'), { key: 'ArrowDown' });
+    expect(document.activeElement?.textContent).toContain('Tomada');
+  });
+
+  it('skips the headings when every device is the same kind', async () => {
+    render(DeviceSwitcher, { devices: devices.slice(0, 2), selectedId: 'a', onselect: vi.fn() });
+    await fireEvent.click(trigger());
+    expect(screen.queryByText('Lâmpadas')).toBeNull();
+    expect(screen.getAllByRole('option')).toHaveLength(2);
+  });
+
   it('has nothing to open for an empty list', () => {
     render(DeviceSwitcher, { devices: [], selectedId: '', onselect: vi.fn() });
     expect((trigger() as HTMLButtonElement).disabled).toBe(true);
