@@ -9,6 +9,10 @@ export const LOCALES: { id: Locale; label: string; tag: string }[] = [
 const pt = {
   'app.noDevices': 'Nenhum dispositivo encontrado.',
   'devices.nav': 'Aparelhos',
+  'devices.lights': 'Lâmpadas',
+  'devices.cameras': 'Câmeras',
+  'devices.plugs': 'Tomadas',
+  'devices.other': 'Outros',
   'inactive.unsupported': 'Ainda não suportado',
   'inactive.offline': 'Offline',
   'inactive.noResponse': 'Sem resposta',
@@ -87,6 +91,10 @@ export type Key = keyof typeof pt;
 const en: Record<Key, string> = {
   'app.noDevices': 'No devices found.',
   'devices.nav': 'Devices',
+  'devices.lights': 'Lights',
+  'devices.cameras': 'Cameras',
+  'devices.plugs': 'Plugs',
+  'devices.other': 'Other',
   'inactive.unsupported': 'Not supported yet',
   'inactive.offline': 'Offline',
   'inactive.noResponse': 'No response',
@@ -162,6 +170,10 @@ const en: Record<Key, string> = {
 const es: Record<Key, string> = {
   'app.noDevices': 'No se encontró ningún dispositivo.',
   'devices.nav': 'Dispositivos',
+  'devices.lights': 'Luces',
+  'devices.cameras': 'Cámaras',
+  'devices.plugs': 'Enchufes',
+  'devices.other': 'Otros',
   'inactive.unsupported': 'Aún no compatible',
   'inactive.offline': 'Sin conexión',
   'inactive.noResponse': 'Sin respuesta',

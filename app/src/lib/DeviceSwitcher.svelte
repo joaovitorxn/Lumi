@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import Icon, { type IconName } from './Icon.svelte';
-  import { t } from './i18n.svelte';
+  import { t, type Key } from './i18n.svelte';
   import type { DeviceView } from './types';
 
   let {
@@ -18,6 +18,22 @@
 
   const icons: Record<string, IconName> = { dj: 'bulb', sp: 'camera', cz: 'plug' };
   const iconFor = (category: string): IconName => icons[category] ?? 'device';
+
+  /** Menu sections in display order; any category not listed falls into the last one. */
+  const kinds: { id: string; label: Key; categories: string[] }[] = [
+    { id: 'lights', label: 'devices.lights', categories: ['dj'] },
+    { id: 'cameras', label: 'devices.cameras', categories: ['sp'] },
+    { id: 'plugs', label: 'devices.plugs', categories: ['cz'] },
+    { id: 'other', label: 'devices.other', categories: [] }
+  ];
+  const kindOf = (category: string) => kinds.find((k) => k.categories.includes(category)) ?? kinds[kinds.length - 1];
+
+  /** Devices grouped by kind, keeping the cloud's order inside each group; empty groups are dropped. */
+  const groups = $derived(
+    kinds
+      .map((kind) => ({ ...kind, devices: devices.filter((d) => kindOf(d.category) === kind) }))
+      .filter((g) => g.devices.length)
+  );
 
   const options = () => Array.from(root?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
 
@@ -93,21 +109,28 @@
 
   {#if open}
     <div class="menu" role="listbox" aria-label={t('devices.nav')} tabindex="-1" onkeydown={listKey}>
-      {#each devices as device (device.id)}
-        <button
-          type="button"
-          class="option"
-          role="option"
-          tabindex="-1"
-          aria-selected={device.id === selected?.id}
-          onclick={() => choose(device.id)}
-        >
-          <span class="kind" class:lit={!!device.light?.on} aria-hidden="true">
-            <Icon name={iconFor(device.category)} size={18} />
-          </span>
-          <span class="name">{device.name}</span>
-          {#if device.id === selected?.id}<span class="tick" aria-hidden="true"><Icon name="check" size={16} /></span>{/if}
-        </button>
+      {#each groups as group (group.id)}
+        <div class="group" role="group" aria-labelledby={groups.length > 1 ? `kind-${group.id}` : undefined}>
+          {#if groups.length > 1}
+            <div class="heading" id="kind-{group.id}">{t(group.label)}</div>
+          {/if}
+          {#each group.devices as device (device.id)}
+            <button
+              type="button"
+              class="option"
+              role="option"
+              tabindex="-1"
+              aria-selected={device.id === selected?.id}
+              onclick={() => choose(device.id)}
+            >
+              <span class="kind" class:lit={!!device.light?.on} aria-hidden="true">
+                <Icon name={iconFor(device.category)} size={18} />
+              </span>
+              <span class="name">{device.name}</span>
+              {#if device.id === selected?.id}<span class="tick" aria-hidden="true"><Icon name="check" size={16} /></span>{/if}
+            </button>
+          {/each}
+        </div>
       {/each}
     </div>
   {/if}
@@ -184,6 +207,16 @@
       opacity: 0;
       transform: translateY(-6px);
     }
+  }
+  .group + .group {
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+  }
+  .heading {
+    padding: 6px 10px 4px;
+    color: var(--muted);
+    font-size: 11.5px;
   }
   .option {
     display: flex;
