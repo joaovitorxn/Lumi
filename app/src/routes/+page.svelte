@@ -7,6 +7,7 @@
   import CameraPanel from '$lib/CameraPanel.svelte';
   import DeviceSwitcher from '$lib/DeviceSwitcher.svelte';
   import InactivePanel from '$lib/InactivePanel.svelte';
+  import { firstDevice } from '$lib/kinds';
   import { lampLight } from '$lib/light';
   import { tweenedLook } from '$lib/lookTween.svelte';
   import LightPanel from '$lib/LightPanel.svelte';
@@ -18,7 +19,7 @@
   const store = new DeviceStore(tauriApi);
 
   let selectedId = $state('');
-  const selected = $derived(store.devices.find((d) => d.id === selectedId) ?? store.devices[0]);
+  const selected = $derived(store.devices.find((d) => d.id === selectedId) ?? firstDevice(store.devices));
   /** The focused lamp's light tints the whole window, so the colour on screen is always the real one. */
   /** The power button stays rendered while it slides away, so it does not vanish before the dropdown has grown. */
   let lastLamp = $state<DeviceView>();
