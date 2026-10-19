@@ -26,7 +26,7 @@ Lumi is a Windows tray app that controls **Tuya** smart lights and cameras throu
 - **Brightness, temperature and colour** with tactile sliders. The light's colour tints the whole window.
 - **The lamp illustration follows the brightness** and colour you set, with smooth transitions.
 - **Cameras**: live video with sound and picture-in-picture, a pan/tilt pad you hold to move, and privacy and motion-tracking switches.
-- **Multiple devices**: pick one from the dropdown at the top, and turn lamps on or off with one button.
+- **Multiple devices**: pick one from the dropdown at the top, grouped into lights, cameras and plugs, and turn lamps on or off with one button.
 - **Brightness readout rolls like a slot machine**, and a lit lamp softly glows.
 - **Always-true state**: refreshes automatically every 10 s and clearly shows synced, updating or error.
 - **Three languages**: Português, English and Español, including the tray menu.
