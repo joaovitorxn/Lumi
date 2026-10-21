@@ -1,0 +1,52 @@
+name: Release
+
+# Builds the Windows installer and publishes it as a GitHub release for the
+# version in app/src-tauri/tauri.conf.json. Run it from the Actions tab once
+# the version bump is on main.
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: Release notes (Markdown)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Test
+        working-directory: app
+        run: npm test
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: v__VERSION__
+          releaseName: Lumi __VERSION__
+          releaseBody: ${{ inputs.notes }}
+          releaseDraft: false
+          args: --bundles nsis
